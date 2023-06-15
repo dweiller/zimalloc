@@ -56,15 +56,13 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     log.debug("alloc slow path", .{});
     var page_iter = page_node.next;
     var prev = page_node;
-    const slot = slot: while (page_iter) |node| : ({
-        prev = node;
-        page_iter = node.next;
-    }) {
+    const slot = slot: while (page_iter) |node| {
         node.data.migrateFreeList();
         const in_use_count = node.data.used_count - node.data.other_freed;
         if (in_use_count == 0) {
-            todo("free/release page");
-            unreachable;
+            deinitPage(node, page_list, prev) catch |err|
+                log.warn("could not madvise page: {s}", .{@errorName(err)});
+            page_iter = prev.next; // deinitPage changed prev.next to node.next
         } else if (in_use_count < node.data.capacity) {
             log.debug("found suitable page", .{});
             // rotate free list
@@ -75,6 +73,9 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             page_list.last = prev;
             page_list.first = node;
             break :slot node.data.allocSlotFast().?;
+        } else {
+            prev = node;
+            page_iter = node.next;
         }
     } else {
         log.debug("no suitable pre-existing page found", .{});
@@ -91,7 +92,7 @@ fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: 
     _ = self;
     const segment = Segment.ofPtr(buf.ptr);
     const page_index = segment.pageIndex(buf.ptr);
-    assert(segment.init_count > page_index);
+    assert(segment.init_set.isSet(page_index));
     const page_node = &(segment.pages[page_index]);
     const page = &page_node.data;
     const slot = page.alignedSlot(buf);
@@ -118,7 +119,7 @@ fn initPage(self: *Heap, slot_size: u32) error{OutOfMemory}!*Page.List.Node {
     const segment: Segment.Ptr = segment: {
         var segment_iter = self.segments;
         while (segment_iter) |node| : (segment_iter = node.next) {
-            if (node.init_count < node.page_count) {
+            if (node.init_set.count() < node.page_count) {
                 break :segment node;
             }
         } else {
@@ -129,22 +130,63 @@ fn initPage(self: *Heap, slot_size: u32) error{OutOfMemory}!*Page.List.Node {
                 assert(orig_head.prev == null);
                 orig_head.prev = segment;
             }
+            log.debug("new segment: {*}", .{segment});
             segment.next = self.segments;
             self.segments = segment;
             break :segment segment;
         }
     };
-    const capacity = if (segment.init_count == 0)
-        @intCast(u16, Segment.small_page_size_first / slot_size)
-    else
-        @intCast(u16, Segment.small_page_size / slot_size);
-    const page_node = &segment.pages[segment.init_count];
+    const index = index: {
+        var iter = segment.init_set.iterator(.{ .kind = .unset });
+        break :index iter.next().?; // segment is guaranteed to have an uninitialised page
+    };
+    assert(index < segment.page_count);
+
+    const capacity = capacity: {
+        if (index == 0) {
+            break :capacity @intCast(u16, Segment.small_page_size_first / slot_size);
+        }
+        break :capacity @intCast(u16, Segment.small_page_size / slot_size);
+    };
+
+    const page_node = &segment.pages[index];
     const page = &page_node.data;
-    log.debug("initialising new page", .{});
-    page.init(slot_size, capacity, segment.pageSlice(segment.init_count));
-    segment.init_count += 1;
+    log.debug("initialising page {d} in segment {*}", .{ index, segment });
+    page.init(slot_size, capacity, segment.pageSlice(index));
+    segment.init_set.set(index);
     self.pages[sizeClass(slot_size)].prepend(page_node);
     return page_node;
+}
+
+fn deinitPage(
+    page_node: *Page.List.Node,
+    page_list: *Page.List,
+    prev_page_node: *Page.List.Node,
+) !void {
+    assert(page_list.first != null);
+
+    const segment = Segment.ofPtr(page_node);
+    const ptr_in_page = page_node.data.alloc_free_list.first orelse
+        page_node.data.local_free_list.first orelse
+        page_node.data.other_free_list.first.?;
+
+    const page_index = segment.pageIndex(ptr_in_page);
+    assert(&segment.pages[page_index] == page_node);
+
+    log.debug("deiniting page {d} in segment {*}", .{ page_index, segment });
+
+    const page_bytes = segment.pageSlice(page_index);
+
+    if (page_list.last == page_node) {
+        assert(page_node.next == null);
+        page_list.last = prev_page_node;
+    } else assert(page_node.next != null);
+    prev_page_node.next = page_node.next;
+
+    segment.init_set.unset(page_index);
+    page_node.* = undefined;
+
+    try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
 }
 
 fn pageSize(slot_size: u32) Segment.PageSize {

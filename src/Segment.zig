@@ -1,7 +1,7 @@
 page_shift: u6,
+init_set: PageBitSet,
 pages: [small_page_count]Page.List.Node,
 page_count: u32,
-init_count: u32,
 next: ?Ptr,
 prev: ?Ptr,
 
@@ -48,7 +48,7 @@ pub fn init(page_size: PageSize) ?Ptr {
                 .pages = undefined,
                 .page_shift = small_page_shift,
                 .page_count = small_page_count,
-                .init_count = 0,
+                .init_set = PageBitSet.initEmpty(),
                 .next = null,
                 .prev = null,
             };
@@ -109,6 +109,8 @@ fn deallocateSegment(self: Ptr) void {
     const ptr = @ptrCast(*align(segment_alignment) [segment_size]u8, self);
     std.os.munmap(ptr);
 }
+
+const PageBitSet = std.StaticBitSet(small_page_count);
 
 const std = @import("std");
 const assert = std.debug.assert;
