@@ -18,8 +18,9 @@ pub const small_page_size_first = small_page_size - segment_first_page_offset;
 const small_page_shift = std.math.log2(small_page_size);
 const large_page_shift = std.math.log2(segment_alignment);
 
-const max_slot_size_small_page = small_page_size / 8;
-pub const max_slot_size_large_page = segment_size / 8;
+pub const min_slots_per_page = 8;
+const max_slot_size_small_page = small_page_size / min_slots_per_page;
+pub const max_slot_size_large_page = segment_size / min_slots_per_page;
 
 pub const Ptr = *align(segment_alignment) @This();
 pub const ConstPtr = *align(segment_alignment) const @This();
