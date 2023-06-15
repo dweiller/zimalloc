@@ -65,6 +65,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             todo("free/release page");
             unreachable;
         } else if (in_use_count < node.data.capacity) {
+            log.debug("found suitable page", .{});
             // rotate free list
             if (page_list.first) |first| {
                 page_list.last.next = first;
@@ -75,13 +76,8 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             break :slot node.data.allocSlotFast().?;
         }
     } else {
+        log.debug("no suitable pre-existing page found", .{});
         const new_page = self.initPage(slot_size) catch return null;
-        if (page_list.first) |first| {
-            page_list.last.next = first;
-        }
-        prev.next = null;
-        page_list.last = prev;
-        page_list.first = new_page;
         break :slot new_page.data.allocSlotFast().?;
     };
     return slot.ptr;
