@@ -39,6 +39,9 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
     const slot_size = slotSizeAligned(len, log2_align);
     const size_class = sizeClass(slot_size);
+    if (size_class >= self.pages.len) {
+        todo("implement huge allocations (> segment size)");
+    }
     const page_list = &self.pages[size_class];
     const page_node = page_list.first orelse self.initPage(slot_size) catch return null;
 
@@ -115,7 +118,9 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     }
 }
 
+/// asserts that `slot_size <= Segment.max_slot_size_large_page`
 fn initPage(self: *Heap, slot_size: u32) error{OutOfMemory}!*Page.List.Node {
+    assert(slot_size <= Segment.max_slot_size_large_page);
     const segment: Segment.Ptr = segment: {
         var segment_iter = self.segments;
         while (segment_iter) |node| : (segment_iter = node.next) {
@@ -124,7 +129,8 @@ fn initPage(self: *Heap, slot_size: u32) error{OutOfMemory}!*Page.List.Node {
             }
         } else {
             log.debug("initialising new segment", .{});
-            const segment = Segment.init(Segment.pageSize(slot_size)) orelse
+            const page_size = Segment.pageSize(slot_size);
+            const segment = Segment.init(page_size) orelse
                 return error.OutOfMemory;
             if (self.segments) |orig_head| {
                 assert(orig_head.prev == null);
@@ -189,20 +195,12 @@ fn deinitPage(
     try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
 }
 
-fn pageSize(slot_size: u32) Segment.PageSize {
-    if (slot_size < Segment.max_slot_size_small_page) {
-        return .small;
-    } else {
-        todo("implement non-small page sizes");
-    }
-}
-
 fn slotSizeAligned(len: usize, log2_align: u8) u32 {
     const alignment = @as(usize, 1) << @intCast(ShiftInt, log2_align);
     return @intCast(u32, if (alignment <= len) len else len - 1 + alignment);
 }
 
-const size_class_count = 64;
+const size_class_count = sizeClass(Segment.max_slot_size_large_page);
 
 const step_1_usize_count = 8;
 const step_2_usize_count = 16;
@@ -253,7 +251,7 @@ fn sizeClass(len: usize) usize {
     } else {
         const b = leading_bit_index(usize_count - 1);
         const extra_bits = usize_count >> (b - step_shift);
-        return ((b << step_shift) + extra_bits) - step_offset;
+        return ((@as(usize, b) << step_shift) + extra_bits) - step_offset;
     }
 }
 
