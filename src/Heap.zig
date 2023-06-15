@@ -41,8 +41,8 @@ const HugeAllocTable = std.AutoHashMap(usize, void);
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
-    const slot_size = slotSizeAligned(len, log2_align);
-    const size_class = sizeClass(slot_size);
+    const aligned_size = slotSizeAligned(len, log2_align);
+    const size_class = sizeClass(aligned_size);
 
     if (size_class >= self.pages.len) {
         self.huge_allocations.ensureUnusedCapacity(1) catch return null;
@@ -52,7 +52,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     }
 
     const page_list = &self.pages[size_class];
-    const page_node = page_list.first orelse self.initPage(slot_size) catch return null;
+    const page_node = page_list.first orelse self.initPage(aligned_size) catch return null;
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debug("alloc fast path", .{});
@@ -91,7 +91,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
         }
     } else {
         log.debug("no suitable pre-existing page found", .{});
-        const new_page = self.initPage(slot_size) catch return null;
+        const new_page = self.initPage(aligned_size) catch return null;
         break :slot new_page.data.allocSlotFast().?;
     };
     return slot.ptr;
@@ -135,8 +135,11 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
 }
 
 /// asserts that `slot_size <= Segment.max_slot_size_large_page`
-fn initPage(self: *Heap, slot_size: u32) error{OutOfMemory}!*Page.List.Node {
+fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
+    const slot_size = indexToSize(sizeClass(size));
+
     assert(slot_size <= Segment.max_slot_size_large_page);
+
     const segment: Segment.Ptr = segment: {
         var segment_iter = self.segments;
         while (segment_iter) |node| : (segment_iter = node.next) {
@@ -164,17 +167,10 @@ fn initPage(self: *Heap, slot_size: u32) error{OutOfMemory}!*Page.List.Node {
     };
     assert(index < segment.page_count);
 
-    const capacity = capacity: {
-        if (index == 0) {
-            break :capacity @intCast(u16, Segment.small_page_size_first / slot_size);
-        }
-        break :capacity @intCast(u16, Segment.small_page_size / slot_size);
-    };
-
     const page_node = &segment.pages[index];
     const page = &page_node.data;
     log.debug("initialising page {d} in segment {*}", .{ index, segment });
-    page.init(slot_size, capacity, segment.pageSlice(index));
+    page.init(slot_size, segment.pageSlice(index));
     segment.init_set.set(index);
     self.pages[sizeClass(slot_size)].prepend(page_node);
     return page_node;
@@ -241,20 +237,20 @@ comptime {
     assert(indexToSize(last_special_index + 1) == last_special_size + last_special_size / step_divisions);
 }
 
-fn indexToSize(index: usize) usize {
+fn indexToSize(index: usize) u32 {
     if (index <= last_special_index) {
         if (index < step_1_usize_count) {
-            return @sizeOf(usize) * (index + 1);
+            return @intCast(u32, @sizeOf(usize) * (index + 1));
         } else {
-            return (index - step_1_usize_count + 1) * 2 * @sizeOf(usize) +
-                step_1_usize_count * @sizeOf(usize);
+            return @intCast(u32, (index - step_1_usize_count + 1) * 2 * @sizeOf(usize) +
+                step_1_usize_count * @sizeOf(usize));
         }
     } else {
         const s = index - last_special_index;
         const size_shift = @intCast(ShiftInt, s / step_divisions);
         const i = s % step_divisions;
 
-        return last_special_size + i * step_size_base * 1 << size_shift;
+        return @intCast(u32, last_special_size + i * step_size_base * 1 << size_shift);
     }
 }
 

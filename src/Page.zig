@@ -10,7 +10,8 @@ const Page = @This();
 
 pub const List = @import("list.zig").List(Page);
 
-pub fn init(self: *Page, slot_size: u32, capacity: u16, bytes: []u8) void {
+pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) void {
+    const capacity = @intCast(u16, bytes.len / slot_size);
     self.* = .{
         .local_free_list = .{ .first = null, .last = undefined },
         .alloc_free_list = .{ .first = null, .last = undefined },
