@@ -1,17 +1,19 @@
 thread_id: std.Thread.Id,
 pages: [size_class_count]Page.List,
 segments: ?Segment.Ptr,
+huge_allocations: HugeAllocTable,
 
 const Heap = @This();
 
 pub const Options = struct {};
 
-pub fn init(comptime options: Options) Heap {
+pub fn init(options: Options) Heap {
     _ = options;
     return .{
         .thread_id = std.Thread.getCurrentId(),
         .pages = .{Page.List{ .first = null, .last = undefined }} ** size_class_count,
         .segments = null,
+        .huge_allocations = HugeAllocTable.init(std.heap.page_allocator),
     };
 }
 
@@ -21,6 +23,7 @@ pub fn deinit(self: *Heap) void {
         segment_iter = segment.next;
         segment.deinit();
     }
+    self.huge_allocations.deinit();
 }
 
 pub fn allocator(self: *Heap) std.mem.Allocator {
@@ -34,14 +37,20 @@ pub fn allocator(self: *Heap) std.mem.Allocator {
     };
 }
 
+const HugeAllocTable = std.AutoHashMap(usize, void);
+
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
-    _ = ret_addr;
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
     const slot_size = slotSizeAligned(len, log2_align);
     const size_class = sizeClass(slot_size);
+
     if (size_class >= self.pages.len) {
-        todo("implement huge allocations (> segment size)");
+        self.huge_allocations.ensureUnusedCapacity(1) catch return null;
+        const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
+        self.huge_allocations.putAssumeCapacityNoClobber(@ptrToInt(ptr), {});
+        return ptr;
     }
+
     const page_list = &self.pages[size_class];
     const page_node = page_list.first orelse self.initPage(slot_size) catch return null;
 
@@ -89,10 +98,12 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 }
 
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
-    _ = ret_addr;
-    _ = log2_align;
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
-    _ = self;
+
+    if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
+        return std.heap.page_allocator.rawResize(buf, log2_align, new_len, ret_addr);
+    }
+
     const segment = Segment.ofPtr(buf.ptr);
     const page_index = segment.pageIndex(buf.ptr);
     assert(segment.init_set.isSet(page_index));
@@ -103,9 +114,14 @@ fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: 
 }
 
 fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
-    _ = ret_addr;
-    _ = log2_align;
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
+
+    if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
+        std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
+        assert(self.huge_allocations.remove(@ptrToInt(buf.ptr)));
+        return;
+    }
+
     const segment = Segment.ofPtr(buf.ptr);
     const page_index = segment.pageIndex(buf.ptr);
     const page_node = &(segment.pages[page_index]);
@@ -266,5 +282,3 @@ const assert = std.debug.assert;
 
 const Page = @import("Page.zig");
 const Segment = @import("Segment.zig");
-
-const todo = @import("util.zig").todo;
