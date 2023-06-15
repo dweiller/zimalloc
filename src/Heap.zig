@@ -143,7 +143,8 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
     const segment: Segment.Ptr = segment: {
         var segment_iter = self.segments;
         while (segment_iter) |node| : (segment_iter = node.next) {
-            if (node.init_set.count() < node.page_count) {
+            const segment_max_slot_size = (@as(usize, 1) << node.page_shift) / Segment.min_slots_per_page;
+            if (node.init_set.count() < node.page_count and segment_max_slot_size >= slot_size) {
                 break :segment node;
             }
         } else {
