@@ -169,7 +169,7 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
 
     const page_node = &segment.pages[index];
     const page = &page_node.data;
-    log.debug("initialising page {d} in segment {*}", .{ index, segment });
+    log.debug("initialising page {d} with slot size {d} in segment {*}", .{ index, slot_size, segment });
     page.init(slot_size, segment.pageSlice(index));
     segment.init_set.set(index);
     self.pages[sizeClass(slot_size)].prepend(page_node);
@@ -223,22 +223,16 @@ const step_size_base = @sizeOf(usize) * step_2_usize_count / step_divisions;
 const step_offset = offset: {
     const b = leading_bit_index(step_2_usize_count);
     const extra_bits = (step_2_usize_count + 1) >> (b - step_shift);
-    break :offset (b << step_shift) + extra_bits - (last_special_index + 1);
+    break :offset (b << step_shift) + extra_bits - first_general_index;
 };
 
-const last_special_index = step_1_usize_count + (step_2_usize_count - step_1_usize_count) / 2 - 1;
+const first_general_index = step_1_usize_count + (step_2_usize_count - step_1_usize_count) / 2;
 const last_special_size = step_2_usize_count * @sizeOf(usize);
 
 const ShiftInt = std.math.Log2Int(usize);
 
-comptime {
-    assert(sizeClass(last_special_size) + 1 == sizeClass(last_special_size + 1));
-    assert(indexToSize(last_special_index) == last_special_size);
-    assert(indexToSize(last_special_index + 1) == last_special_size + last_special_size / step_divisions);
-}
-
 fn indexToSize(index: usize) u32 {
-    if (index <= last_special_index) {
+    if (index < first_general_index) {
         if (index < step_1_usize_count) {
             return @intCast(u32, @sizeOf(usize) * (index + 1));
         } else {
@@ -246,7 +240,7 @@ fn indexToSize(index: usize) u32 {
                 step_1_usize_count * @sizeOf(usize));
         }
     } else {
-        const s = index - last_special_index;
+        const s = index - first_general_index + 1;
         const size_shift = @intCast(ShiftInt, s / step_divisions);
         const i = s % step_divisions;
 
@@ -255,6 +249,7 @@ fn indexToSize(index: usize) u32 {
 }
 
 fn sizeClass(len: usize) usize {
+    assert(len > 0);
     const usize_count = (len + @sizeOf(usize) - 1) / @sizeOf(usize);
     if (usize_count <= step_1_usize_count) {
         return usize_count - 1;
@@ -262,13 +257,53 @@ fn sizeClass(len: usize) usize {
         return (usize_count - step_1_usize_count - 1) / 2 + step_1_usize_count;
     } else {
         const b = leading_bit_index(usize_count - 1);
-        const extra_bits = usize_count >> (b - step_shift);
+        const extra_bits = (usize_count - 1) >> (b - step_shift);
         return ((@as(usize, b) << step_shift) + extra_bits) - step_offset;
     }
 }
 
 inline fn leading_bit_index(a: usize) std.math.Log2Int(usize) {
     return @intCast(std.math.Log2Int(usize), @bitSizeOf(usize) - 1 - @clz(a));
+}
+
+test indexToSize {
+    try std.testing.expectEqual(indexToSize(first_general_index - 1), last_special_size);
+    try std.testing.expectEqual(indexToSize(first_general_index), last_special_size + last_special_size / step_divisions);
+
+    for (0..step_1_usize_count) |i| {
+        try std.testing.expectEqual((i + 1) * @sizeOf(usize), indexToSize(i));
+    }
+    for (step_1_usize_count..first_general_index) |i| {
+        try std.testing.expectEqual(((step_1_usize_count) + (i - step_1_usize_count + 1) * 2) * @sizeOf(usize), indexToSize(i));
+    }
+    for (first_general_index..size_class_count) |i| {
+        const extra = (i - first_general_index) % step_divisions + 1;
+        const base = first_general_index + step_divisions * ((i - first_general_index) / step_divisions);
+        const base_size = indexToSize(base - 1);
+        try std.testing.expectEqual(base_size + extra * base_size / step_divisions, indexToSize(i));
+    }
+}
+
+test sizeClass {
+    try std.testing.expectEqual(sizeClass(last_special_size) + 1, sizeClass(last_special_size + 1));
+    try std.testing.expectEqual(@as(usize, first_general_index - 1), sizeClass(last_special_size));
+    try std.testing.expectEqual(@as(usize, first_general_index), sizeClass(last_special_size + 1));
+    try std.testing.expectEqual(@as(usize, first_general_index), sizeClass(last_special_size + last_special_size / step_divisions - 1));
+}
+
+test "sizeClass inverse of indexToSize" {
+    for (0..size_class_count) |i| {
+        try std.testing.expectEqual(i, sizeClass(indexToSize(i)));
+    }
+
+    for (1..@sizeOf(usize) + 1) |size| {
+        try std.testing.expectEqual(indexToSize(0), indexToSize(sizeClass(size)));
+    }
+    for (1..size_class_count) |i| {
+        for (indexToSize(i - 1) + 1..indexToSize(i) + 1) |size| {
+            try std.testing.expectEqual(indexToSize(i), indexToSize(sizeClass(size)));
+        }
+    }
 }
 
 const log = std.log.scoped(.zimalloc);
