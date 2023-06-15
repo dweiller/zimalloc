@@ -4,6 +4,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const zimalloc = b.addModule("zimalloc", .{
+        .source_file = .{ .path = "src/zimalloc.zig" },
+    });
+
     const exe_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/zimalloc.zig" },
         .target = target,
@@ -28,7 +32,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = .{ .path = b.pathJoin(&.{ "test", test_name }) },
             .optimize = optimize,
         });
-        test_exe.addAnonymousModule("zimalloc", .{ .source_file = .{ .path = "src/zimalloc.zig" } });
+        test_exe.addModule("zimalloc", zimalloc);
         test_exe.addOptions("build_options", standalone_options);
         test_exe.override_dest_dir = .{ .custom = "test" };
 
