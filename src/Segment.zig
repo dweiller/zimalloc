@@ -16,10 +16,10 @@ const segment_first_page_offset = std.mem.alignForward(segment_metadata_bytes, s
 pub const small_page_size_first = small_page_size - segment_first_page_offset;
 
 const small_page_shift = std.math.log2(small_page_size);
-const large_page_shift = segment_alignment;
+const large_page_shift = std.math.log2(segment_alignment);
 
 const max_slot_size_small_page = small_page_size / 8;
-const max_slot_size_large_page = segment_size / 8;
+pub const max_slot_size_large_page = segment_size / 8;
 
 pub const Ptr = *align(segment_alignment) @This();
 pub const ConstPtr = *align(segment_alignment) const @This();
@@ -27,14 +27,17 @@ pub const ConstPtr = *align(segment_alignment) const @This();
 pub const PageSize = union(enum) {
     small,
     large,
-    single: usize,
 };
 
+/// asserts that `slot_size <= max_slot_size_large_page`
 pub fn pageSize(slot_size: u32) PageSize {
+    assert(slot_size <= max_slot_size_large_page);
     if (slot_size <= max_slot_size_small_page)
         return .small
+    else if (slot_size <= max_slot_size_large_page)
+        return .large
     else
-        todo("implment non-small page sizes");
+        unreachable;
 }
 
 pub fn ofPtr(ptr: *const anyopaque) Ptr {
@@ -57,11 +60,14 @@ pub fn init(page_size: PageSize) ?Ptr {
             };
         },
         .large => {
-            todo("implement large page segments");
-        },
-        .single => |size| {
-            _ = size;
-            todo("implement single page segments");
+            self.* = .{
+                .pages = undefined,
+                .page_shift = large_page_shift,
+                .page_count = 1,
+                .init_set = PageBitSet.initEmpty(),
+                .next = null,
+                .prev = null,
+            };
         },
     }
     return self;
@@ -77,14 +83,13 @@ pub fn pageIndex(self: ConstPtr, ptr: *anyopaque) usize {
 }
 
 pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
-    // TODO: handle non-small pages
-    assert(self.page_shift == small_page_shift);
-
     if (index == 0) {
         const segment_end = @ptrToInt(self) + @sizeOf(@This());
         const address = std.mem.alignForward(segment_end, std.mem.page_size);
-        return @alignCast(std.mem.page_size, @intToPtr([*]u8, address))[0..small_page_size_first];
+        const page_size = (@as(usize, 1) << self.page_shift) - segment_first_page_offset;
+        return @alignCast(std.mem.page_size, @intToPtr([*]u8, address))[0..page_size];
     } else {
+        assert(self.page_shift == small_page_shift);
         const address = @ptrToInt(self) + index * small_page_size;
         return @alignCast(std.mem.page_size, @intToPtr([*]u8, address))[0..small_page_size];
     }
@@ -119,5 +124,3 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Page = @import("Page.zig");
-
-const todo = @import("util.zig").todo;
