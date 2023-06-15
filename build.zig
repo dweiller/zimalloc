@@ -8,14 +8,15 @@ pub fn build(b: *std.Build) void {
         .source_file = .{ .path = "src/zimalloc.zig" },
     });
 
-    const exe_tests = b.addTest(.{
+    const tests = b.addTest(.{
         .root_source_file = .{ .path = "src/zimalloc.zig" },
         .target = target,
         .optimize = optimize,
     });
+    const tests_run = b.addRunArtifact(tests);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    test_step.dependOn(&tests_run.step);
 
     b.default_step = test_step;
 
