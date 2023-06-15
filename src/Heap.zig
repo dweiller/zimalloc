@@ -17,7 +17,8 @@ pub fn init(comptime options: Options) Heap {
 
 pub fn deinit(self: *Heap) void {
     var segment_iter = self.segments;
-    while (segment_iter) |segment| : (segment_iter = segment.next) {
+    while (segment_iter) |segment| {
+        segment_iter = segment.next;
         segment.deinit();
     }
 }
