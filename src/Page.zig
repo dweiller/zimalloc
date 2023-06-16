@@ -1,12 +1,14 @@
 local_free_list: FreeList,
 alloc_free_list: FreeList,
 other_free_list: FreeList,
-used_count: u16,
-other_freed: u16,
+used_count: SlotCountInt,
+other_freed: SlotCountInt,
 capacity: u16, // number of slots
 slot_size: u32,
 
 const Page = @This();
+
+const SlotCountInt = std.math.IntFittingRange(0, constants.small_page_size / @sizeOf(usize));
 
 pub const List = @import("list.zig").List(Page);
 
@@ -64,6 +66,7 @@ pub fn migrateFreeList(self: *Page) void {
     self.local_free_list.first = null;
 
     var other_free_list_head = self.other_free_list.first;
+
     while (@cmpxchgWeak(
         ?*FreeList.Node,
         &self.other_free_list.first,
@@ -74,7 +77,24 @@ pub fn migrateFreeList(self: *Page) void {
     )) |head| {
         other_free_list_head = head;
     }
-    if (other_free_list_head) |head| self.alloc_free_list.append(head);
+
+    var other_freed = self.other_freed;
+
+    while (@cmpxchgWeak(
+        SlotCountInt,
+        &self.other_freed,
+        other_freed,
+        self.used_count - other_freed,
+        .Monotonic,
+        .Monotonic,
+    )) |freed| other_freed = freed;
+
+    if (other_free_list_head) |head| {
+        assert(other_freed <= self.used_count);
+        self.used_count -= other_freed;
+        self.alloc_free_list.append(head);
+    }
+    @fence(.AcqRel);
 }
 
 /// returns the `Slot` containing `bytes.ptr`
@@ -110,6 +130,8 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
     const node = @ptrCast(*FreeList.Node, slot);
     node.next = self.other_free_list.first;
     // TODO: figure out correct atomic orders
+    @fence(.AcqRel);
+    _ = @atomicRmw(SlotCountInt, &self.other_freed, .Add, 1, .Monotonic);
     while (@cmpxchgWeak(
         ?*FreeList.Node,
         &self.other_free_list.first,
@@ -117,11 +139,7 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
         node,
         .Monotonic,
         .Monotonic,
-    )) |old_value| {
-        node.next = old_value;
-    }
-    // TODO: figure out correct atomic order
-    _ = @atomicRmw(u16, &self.other_freed, .Add, 1, .Monotonic);
+    )) |old_value| node.next = old_value;
 }
 
 const FreeList = @import("list.zig").List(void);
@@ -133,6 +151,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const log = @import("log.zig");
+const constants = @import("constants.zig");
 const options = @import("options");
 
 const Segment = @import("Segment.zig");
