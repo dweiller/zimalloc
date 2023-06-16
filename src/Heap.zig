@@ -320,17 +320,24 @@ inline fn leading_bit_index(a: usize) std.math.Log2Int(usize) {
 
 test indexToSize {
     try std.testing.expectEqual(indexToSize(first_general_index - 1), last_special_size);
-    try std.testing.expectEqual(indexToSize(first_general_index), last_special_size + last_special_size / step_divisions);
+    try std.testing.expectEqual(
+        indexToSize(first_general_index),
+        last_special_size + last_special_size / step_divisions,
+    );
 
     for (0..step_1_usize_count) |i| {
         try std.testing.expectEqual((i + 1) * @sizeOf(usize), indexToSize(i));
     }
     for (step_1_usize_count..first_general_index) |i| {
-        try std.testing.expectEqual(((step_1_usize_count) + (i - step_1_usize_count + 1) * 2) * @sizeOf(usize), indexToSize(i));
+        try std.testing.expectEqual(
+            ((step_1_usize_count) + (i - step_1_usize_count + 1) * 2) * @sizeOf(usize),
+            indexToSize(i),
+        );
     }
     for (first_general_index..size_class_count) |i| {
         const extra = (i - first_general_index) % step_divisions + 1;
-        const base = first_general_index + step_divisions * ((i - first_general_index) / step_divisions);
+        const rounded_index = step_divisions * ((i - first_general_index) / step_divisions);
+        const base = first_general_index + rounded_index;
         const base_size = indexToSize(base - 1);
         try std.testing.expectEqual(base_size + extra * base_size / step_divisions, indexToSize(i));
     }
@@ -340,7 +347,10 @@ test sizeClass {
     try std.testing.expectEqual(sizeClass(last_special_size) + 1, sizeClass(last_special_size + 1));
     try std.testing.expectEqual(@as(usize, first_general_index - 1), sizeClass(last_special_size));
     try std.testing.expectEqual(@as(usize, first_general_index), sizeClass(last_special_size + 1));
-    try std.testing.expectEqual(@as(usize, first_general_index), sizeClass(last_special_size + last_special_size / step_divisions - 1));
+    try std.testing.expectEqual(
+        @as(usize, first_general_index),
+        sizeClass(last_special_size + last_special_size / step_divisions - 1),
+    );
 }
 
 test "sizeClass inverse of indexToSize" {
