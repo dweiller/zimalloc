@@ -5,23 +5,6 @@ page_count: u32,
 next: ?Ptr,
 prev: ?Ptr,
 
-const segment_alignment = 1 << 23; // 4 MiB
-const segment_size = segment_alignment;
-
-pub const small_page_size = 1 << 16; // 64 KiB
-const small_page_count = segment_size / small_page_size;
-
-const segment_metadata_bytes = @sizeOf(@This());
-const segment_first_page_offset = std.mem.alignForward(segment_metadata_bytes, std.mem.page_size);
-pub const small_page_size_first = small_page_size - segment_first_page_offset;
-
-const small_page_shift = std.math.log2(small_page_size);
-const large_page_shift = std.math.log2(segment_alignment);
-
-pub const min_slots_per_page = 8;
-const max_slot_size_small_page = small_page_size / min_slots_per_page;
-pub const max_slot_size_large_page = segment_size / min_slots_per_page;
-
 pub const Ptr = *align(segment_alignment) @This();
 pub const ConstPtr = *align(segment_alignment) const @This();
 
@@ -125,3 +108,14 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Page = @import("Page.zig");
+
+const constants = @import("constants.zig");
+const segment_alignment = constants.segment_alignment;
+const segment_size = constants.segment_size;
+const small_page_count = constants.small_page_count;
+const small_page_size = constants.small_page_size;
+const max_slot_size_small_page = constants.max_slot_size_small_page;
+const max_slot_size_large_page = constants.max_slot_size_large_page;
+const small_page_shift = constants.small_page_shift;
+const large_page_shift = constants.large_page_shift;
+const segment_first_page_offset = constants.segment_first_page_offset;
