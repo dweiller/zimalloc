@@ -34,6 +34,22 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) v
     }
 }
 
+pub fn deinit(self: *Page) !void {
+    const segment = Segment.ofPtr(self);
+    const ptr_in_page = self.alloc_free_list.first orelse
+        self.local_free_list.first orelse
+        self.other_free_list.first.?;
+
+    const page_index = segment.pageIndex(ptr_in_page);
+    assert(&segment.pages[page_index].data == self);
+
+    log.debug("deiniting page {d} in segment {*}", .{ page_index, segment });
+    segment.init_set.unset(page_index);
+
+    const page_bytes = segment.pageSlice(page_index);
+    try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
+}
+
 pub const Slot = []align(8) u8;
 
 pub fn allocSlotFast(self: *Page) ?Slot {
@@ -116,6 +132,7 @@ const min_slot_size = @sizeOf(FreeList.Node);
 const std = @import("std");
 const assert = std.debug.assert;
 
+const log = @import("log.zig");
 const options = @import("options");
 
 const Segment = @import("Segment.zig");
