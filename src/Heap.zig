@@ -57,6 +57,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 
     const page_list = &self.pages[size_class];
     const page_node = page_list.first orelse page_node: {
+        @setCold(true);
         log.debug("no pages with size class {d}", .{size_class});
         break :page_node self.initPage(aligned_size) catch return null;
     };
