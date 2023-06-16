@@ -1,4 +1,4 @@
-pub const segment_alignment = 1 << 23; // 4 MiB
+pub const segment_alignment = 1 << 23; // 8 MiB
 pub const segment_size = segment_alignment;
 
 pub const small_page_size = 1 << 16; // 64 KiB
