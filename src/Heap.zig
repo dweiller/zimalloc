@@ -154,16 +154,17 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     }
 }
 
-/// asserts that `slot_size <= Segment.max_slot_size_large_page`
+/// asserts that `slot_size <= max_slot_size_large_page`
 fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
     const slot_size = indexToSize(sizeClass(size));
 
-    assert(slot_size <= Segment.max_slot_size_large_page);
+    assert(slot_size <= constants.max_slot_size_large_page);
 
     const segment: Segment.Ptr = segment: {
         var segment_iter = self.segments;
         while (segment_iter) |node| : (segment_iter = node.next) {
-            const segment_max_slot_size = (@as(usize, 1) << node.page_shift) / Segment.min_slots_per_page;
+            const page_size = @as(usize, 1) << node.page_shift;
+            const segment_max_slot_size = page_size / constants.min_slots_per_page;
             if (node.init_set.count() < node.page_count and segment_max_slot_size >= slot_size) {
                 break :segment node;
             }
@@ -238,7 +239,7 @@ fn slotSizeAligned(len: usize, log2_align: u8) u32 {
         @intCast(u32, len - 1 + alignment);
 }
 
-const size_class_count = sizeClass(Segment.max_slot_size_large_page);
+const size_class_count = sizeClass(constants.max_slot_size_large_page);
 
 const step_1_usize_count = 8;
 const step_2_usize_count = 16;
@@ -336,6 +337,8 @@ const log = std.log.scoped(.zimalloc);
 
 const std = @import("std");
 const assert = std.debug.assert;
+
+const constants = @import("constants.zig");
 
 const Page = @import("Page.zig");
 const Segment = @import("Segment.zig");
