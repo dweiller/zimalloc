@@ -53,7 +53,10 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
         return ptr;
     }
 
-    log.debug("alloc: len={d}, log2_align={d}, size_class={d}", .{ len, log2_align, size_class });
+    log.debugVerbose(
+        "alloc: len={d}, log2_align={d}, size_class={d}",
+        .{ len, log2_align, size_class },
+    );
 
     const page_list = &self.pages[size_class];
     const page_node = page_list.first orelse page_node: {
@@ -63,19 +66,19 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     };
 
     if (page_node.data.allocSlotFast()) |buf| {
-        log.debug("alloc fast path", .{});
+        log.debugVerbose("alloc fast path", .{});
         const aligned_address = std.mem.alignForwardLog2(@ptrToInt(buf.ptr), log2_align);
         return @intToPtr([*]u8, aligned_address);
     }
 
     page_node.data.migrateFreeList();
     if (page_node.data.allocSlotFast()) |buf| {
-        log.debug("alloc slow path (first page)", .{});
+        log.debugVerbose("alloc slow path (first page)", .{});
         const aligned_address = std.mem.alignForwardLog2(@ptrToInt(buf.ptr), log2_align);
         return @intToPtr([*]u8, aligned_address);
     }
 
-    log.debug("alloc slow path", .{});
+    log.debugVerbose("alloc slow path", .{});
     var page_iter = page_node.next;
     var prev = page_node;
     const slot = slot: while (page_iter) |node| {
@@ -90,7 +93,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
                 self.releaseSegment(segment);
             }
         } else if (in_use_count < node.data.capacity) {
-            log.debug("found suitable page", .{});
+            log.debugVerbose("found suitable page", .{});
             // rotate free list
             if (page_list.first) |first| {
                 page_list.last.next = first;
@@ -104,7 +107,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             page_iter = node.next;
         }
     } else {
-        log.debug("no suitable pre-existing page found", .{});
+        log.debugVerbose("no suitable pre-existing page found", .{});
         const new_page = self.initPage(aligned_size) catch return null;
         break :slot new_page.data.allocSlotFast().?;
     };
@@ -115,7 +118,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
 
-    log.debug(
+    log.debugVerbose(
         "resize: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
         .{ buf.ptr, buf.len, log2_align, new_len },
     );
@@ -136,10 +139,13 @@ fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: 
 fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
 
-    log.debug("free: buf.ptr={*}, buf.len={d}, log2_align={d}", .{ buf.ptr, buf.len, log2_align });
+    log.debugVerbose(
+        "free: buf.ptr={*}, buf.len={d}, log2_align={d}",
+        .{ buf.ptr, buf.len, log2_align },
+    );
 
     if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
-        log.debug("freeing huge allocation {*}", .{buf.ptr});
+        log.debugVerbose("freeing huge allocation {*}", .{buf.ptr});
         std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
         assert(self.huge_allocations.remove(@ptrToInt(buf.ptr)));
         return;
@@ -151,10 +157,10 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, buf.ptr);
     if (std.Thread.getCurrentId() == self.thread_id) {
-        log.debug("freeing slot {*} to local freelist", .{slot.ptr});
+        log.debugVerbose("freeing slot {*} to local freelist", .{slot.ptr});
         page.freeLocalAligned(slot);
     } else {
-        log.debug("freeing slot {*} to other freelist", .{slot.ptr});
+        log.debugVerbose("freeing slot {*} to other freelist", .{slot.ptr});
         page.freeOtherAligned(slot);
     }
 }
@@ -174,7 +180,6 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
                 break :segment node;
             }
         } else {
-            log.debug("initialising new segment", .{});
             const page_size = Segment.pageSize(slot_size);
             const segment = Segment.init(page_size) orelse
                 return error.OutOfMemory;
@@ -182,7 +187,7 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
                 assert(orig_head.prev == null);
                 orig_head.prev = segment;
             }
-            log.debug("new segment: {*}", .{segment});
+            log.debug("initialised new segment: {*}", .{segment});
             segment.next = self.segments;
             self.segments = segment;
             break :segment segment;
@@ -196,7 +201,10 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
 
     const page_node = &segment.pages[index];
     const page = &page_node.data;
-    log.debug("initialising page {d} with slot size {d} in segment {*}", .{ index, slot_size, segment });
+    log.debug(
+        "initialising page {d} with slot size {d} in segment {*}",
+        .{ index, slot_size, segment },
+    );
     page.init(slot_size, segment.pageSlice(index));
     segment.init_set.set(index);
     self.pages[sizeClass(slot_size)].prepend(page_node);
@@ -350,10 +358,10 @@ test "sizeClass inverse of indexToSize" {
     }
 }
 
-const log = std.log.scoped(.zimalloc);
-
 const std = @import("std");
 const assert = std.debug.assert;
+
+const log = @import("log.zig");
 
 const constants = @import("constants.zig");
 
