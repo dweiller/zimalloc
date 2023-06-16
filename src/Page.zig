@@ -81,6 +81,7 @@ pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyo
 
 pub fn freeLocalAligned(self: *Page, slot: Slot) void {
     assert(self.containingSlot(slot.ptr).ptr == slot.ptr);
+    assert(self.used_count > 0);
 
     const node_ptr = @ptrCast(*FreeList.Node, slot);
     self.local_free_list.prepend(node_ptr);
