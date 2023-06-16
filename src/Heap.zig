@@ -84,6 +84,10 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             deinitPage(node, page_list, prev) catch |err|
                 log.warn("could not madvise page: {s}", .{@errorName(err)});
             page_iter = prev.next; // deinitPage changed prev.next to node.next
+            const segment = Segment.ofPtr(node);
+            if (segment.init_set.count() == 0) {
+                self.releaseSegment(segment);
+            }
         } else if (in_use_count < node.data.capacity) {
             log.debug("found suitable page", .{});
             // rotate free list
@@ -227,6 +231,18 @@ fn deinitPage(
     page_node.* = undefined;
 
     try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
+}
+
+fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
+    assert(self.segments != null);
+
+    log.debug("releasing segment {*}", .{segment});
+    if (self.segments.? == segment) {
+        self.segments = segment.next;
+    }
+    if (segment.prev) |prev| prev.next = segment.next;
+    if (segment.next) |next| next.prev = segment.prev;
+    segment.deinit();
 }
 
 fn slotSizeAligned(len: usize, log2_align: u8) u32 {
