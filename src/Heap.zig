@@ -51,8 +51,13 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
         return ptr;
     }
 
+    log.debug("alloc: len={d}, log2_align={d}, size_class={d}", .{ len, log2_align, size_class });
+
     const page_list = &self.pages[size_class];
-    const page_node = page_list.first orelse self.initPage(aligned_size) catch return null;
+    const page_node = page_list.first orelse page_node: {
+        log.debug("no pages with size class {d}", .{size_class});
+        break :page_node self.initPage(aligned_size) catch return null;
+    };
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debug("alloc fast path", .{});
@@ -100,6 +105,11 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
 
+    log.debug(
+        "resize: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
+        .{ buf.ptr, buf.len, log2_align, new_len },
+    );
+
     if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
         return std.heap.page_allocator.rawResize(buf, log2_align, new_len, ret_addr);
     }
@@ -116,7 +126,10 @@ fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: 
 fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
 
+    log.debug("free: buf.ptr={*}, buf.len={d}, log2_align={d}", .{ buf.ptr, buf.len, log2_align });
+
     if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
+        log.debug("freeing huge allocation {*}", .{buf.ptr});
         std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
         assert(self.huge_allocations.remove(@ptrToInt(buf.ptr)));
         return;
@@ -128,8 +141,10 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     const page = &page_node.data;
     const slot = page.alignedSlot(buf);
     if (std.Thread.getCurrentId() == self.thread_id) {
+        log.debug("freeing slot {*} to local freelist", .{slot.ptr});
         page.freeLocalAligned(slot);
     } else {
+        log.debug("freeing slot {*} to other freelist", .{slot.ptr});
         page.freeOtherAligned(slot);
     }
 }
