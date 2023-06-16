@@ -61,21 +61,26 @@ pub fn migrateFreeList(self: *Page) void {
     if (other_free_list_head) |head| self.alloc_free_list.append(head);
 }
 
-pub fn alignedSlot(self: *const Page, bytes: []u8) Slot {
+/// returns the `Slot` containing `bytes.ptr`
+pub fn containingSlot(self: *const Page, ptr: *anyopaque) Slot {
     const segment = Segment.ofPtr(self);
-    const page_slice = segment.pageSlice(segment.pageIndex(bytes.ptr));
+    return self.containingSlotSegment(segment, ptr);
+}
+
+/// returns the `Slot` containing `bytes.ptr`
+pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyopaque) Slot {
+    const page_slice = segment.pageSlice(segment.pageIndex(ptr));
     const page_address = @ptrToInt(page_slice.ptr);
-    const bytes_address = @ptrToInt(bytes.ptr);
+    const bytes_address = @ptrToInt(ptr);
     const index = (bytes_address - page_address) / self.slot_size;
     const slot_address = page_address + index * self.slot_size;
     const slot = @intToPtr([*]align(8) u8, slot_address)[0..self.slot_size];
     assert(slot_address <= bytes_address);
-    assert(slot_address + self.slot_size >= bytes_address + bytes.len);
     return slot;
 }
 
 pub fn freeLocalAligned(self: *Page, slot: Slot) void {
-    assert(self.alignedSlot(slot).ptr == slot.ptr);
+    assert(self.containingSlot(slot.ptr).ptr == slot.ptr);
 
     const node_ptr = @ptrCast(*FreeList.Node, slot);
     self.local_free_list.prepend(node_ptr);
@@ -83,7 +88,7 @@ pub fn freeLocalAligned(self: *Page, slot: Slot) void {
 }
 
 pub fn freeOtherAligned(self: *Page, slot: Slot) void {
-    assert(self.alignedSlot(slot).ptr == slot.ptr);
+    assert(self.containingSlot(slot.ptr).ptr == slot.ptr);
 
     const node = @ptrCast(*FreeList.Node, slot);
     node.next = self.other_free_list.first;

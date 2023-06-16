@@ -41,10 +41,12 @@ const HugeAllocTable = std.AutoHashMap(usize, void);
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
+
     const aligned_size = slotSizeAligned(len, log2_align);
     const size_class = sizeClass(aligned_size);
 
     if (size_class >= self.pages.len) {
+        assert(@as(usize, 1) << @intCast(ShiftInt, log2_align) <= std.mem.page_size);
         self.huge_allocations.ensureUnusedCapacity(1) catch return null;
         const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
         self.huge_allocations.putAssumeCapacityNoClobber(@ptrToInt(ptr), {});
@@ -61,13 +63,15 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debug("alloc fast path", .{});
-        return buf.ptr;
+        const aligned_address = std.mem.alignForwardLog2(@ptrToInt(buf.ptr), log2_align);
+        return @intToPtr([*]u8, aligned_address);
     }
 
     page_node.data.migrateFreeList();
     if (page_node.data.allocSlotFast()) |buf| {
         log.debug("alloc slow path (first page)", .{});
-        return buf.ptr;
+        const aligned_address = std.mem.alignForwardLog2(@ptrToInt(buf.ptr), log2_align);
+        return @intToPtr([*]u8, aligned_address);
     }
 
     log.debug("alloc slow path", .{});
@@ -99,7 +103,8 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
         const new_page = self.initPage(aligned_size) catch return null;
         break :slot new_page.data.allocSlotFast().?;
     };
-    return slot.ptr;
+    const aligned_address = std.mem.alignForwardLog2(@ptrToInt(slot.ptr), log2_align);
+    return @intToPtr([*]u8, aligned_address);
 }
 
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
@@ -119,7 +124,7 @@ fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: 
     assert(segment.init_set.isSet(page_index));
     const page_node = &(segment.pages[page_index]);
     const page = &page_node.data;
-    const slot = page.alignedSlot(buf);
+    const slot = page.containingSlotSegment(segment, buf.ptr);
     return @ptrToInt(buf.ptr) + new_len <= @ptrToInt(slot.ptr) + slot.len;
 }
 
@@ -137,9 +142,9 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
 
     const segment = Segment.ofPtr(buf.ptr);
     const page_index = segment.pageIndex(buf.ptr);
-    const page_node = &(segment.pages[page_index]);
+    const page_node = &segment.pages[page_index];
     const page = &page_node.data;
-    const slot = page.alignedSlot(buf);
+    const slot = page.containingSlotSegment(segment, buf.ptr);
     if (std.Thread.getCurrentId() == self.thread_id) {
         log.debug("freeing slot {*} to local freelist", .{slot.ptr});
         page.freeLocalAligned(slot);
@@ -224,8 +229,13 @@ fn deinitPage(
 }
 
 fn slotSizeAligned(len: usize, log2_align: u8) u32 {
+    const next_size = indexToSize(sizeClass(len));
+    const next_size_log2_align = @ctz(next_size);
     const alignment = @as(usize, 1) << @intCast(ShiftInt, log2_align);
-    return @intCast(u32, if (alignment <= len) len else len - 1 + alignment);
+    return if (log2_align <= next_size_log2_align)
+        @intCast(u32, len)
+    else
+        @intCast(u32, len - 1 + alignment);
 }
 
 const size_class_count = sizeClass(Segment.max_slot_size_large_page);
