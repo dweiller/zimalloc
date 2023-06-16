@@ -218,28 +218,14 @@ fn deinitPage(
 ) !void {
     assert(page_list.first != null);
 
-    const segment = Segment.ofPtr(page_node);
-    const ptr_in_page = page_node.data.alloc_free_list.first orelse
-        page_node.data.local_free_list.first orelse
-        page_node.data.other_free_list.first.?;
-
-    const page_index = segment.pageIndex(ptr_in_page);
-    assert(&segment.pages[page_index] == page_node);
-
-    log.debug("deiniting page {d} in segment {*}", .{ page_index, segment });
-
-    const page_bytes = segment.pageSlice(page_index);
-
     if (page_list.last == page_node) {
         assert(page_node.next == null);
         page_list.last = prev_page_node;
     } else assert(page_node.next != null);
     prev_page_node.next = page_node.next;
 
-    segment.init_set.unset(page_index);
-    page_node.* = undefined;
-
-    try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
+    defer page_node.* = undefined;
+    try page_node.data.deinit();
 }
 
 fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
