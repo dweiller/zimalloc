@@ -4,8 +4,30 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const verbose_logging = b.option(
+        bool,
+        "verbose-logging",
+        "Enable verbose logging",
+    );
+
+    const log_level = b.option(
+        std.log.Level,
+        "log-level",
+        "Override the default log level",
+    );
+
+    const build_options = b.addOptions();
+    if (verbose_logging) |verbose|
+        build_options.addOption(bool, "verbose_logging", verbose);
+    if (log_level) |level|
+        build_options.addOption(std.log.Level, "log_level", level);
+
+    const zimalloc_options = build_options.createModule();
     const zimalloc = b.addModule("zimalloc", .{
         .source_file = .{ .path = "src/zimalloc.zig" },
+        .dependencies = &.{
+            .{ .name = "build_options", .module = zimalloc_options },
+        },
     });
 
     const tests = b.addTest(.{
@@ -13,6 +35,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    tests.addModule("build_options", zimalloc_options);
+
     const tests_run = b.addRunArtifact(tests);
 
     const test_step = b.step("test", "Run unit tests");
