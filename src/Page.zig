@@ -84,7 +84,7 @@ pub fn migrateFreeList(self: *Page) void {
         SlotCountInt,
         &self.other_freed,
         other_freed,
-        self.used_count - other_freed,
+        0,
         .Monotonic,
         .Monotonic,
     )) |freed| other_freed = freed;
