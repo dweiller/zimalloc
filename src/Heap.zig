@@ -300,8 +300,8 @@ fn sizeClass(len: usize) usize {
     }
 }
 
-inline fn leading_bit_index(a: usize) std.math.Log2Int(usize) {
-    return @intCast(std.math.Log2Int(usize), @bitSizeOf(usize) - 1 - @clz(a));
+inline fn leading_bit_index(a: usize) ShiftInt {
+    return @intCast(ShiftInt, @bitSizeOf(usize) - 1 - @clz(a));
 }
 
 test indexToSize {
