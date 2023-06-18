@@ -39,29 +39,31 @@ pub fn allocator(self: *Heap) std.mem.Allocator {
 
 const HugeAllocTable = std.AutoHashMap(usize, void);
 
+const ShiftIntU32 = std.math.Log2Int(u32);
+
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     const self = @ptrCast(*Heap, @alignCast(@alignOf(Heap), ctx));
 
-    const aligned_size = slotSizeAligned(len, log2_align);
-    const size_class = sizeClass(aligned_size);
-
-    if (size_class >= self.pages.len) {
-        assert(@as(usize, 1) << @intCast(ShiftInt, log2_align) <= std.mem.page_size);
+    if (len > constants.max_slot_size_large_page) {
+        assert(@as(u32, 1) << @intCast(ShiftIntU32, log2_align) <= std.mem.page_size);
         self.huge_allocations.ensureUnusedCapacity(1) catch return null;
         const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
         self.huge_allocations.putAssumeCapacityNoClobber(@ptrToInt(ptr), {});
         return ptr;
     }
 
+    const aligned_size = slotSizeAligned(@intCast(u32, len), log2_align);
+    const class = sizeClass(aligned_size);
+
     log.debugVerbose(
         "alloc: len={d}, log2_align={d}, size_class={d}",
-        .{ len, log2_align, size_class },
+        .{ len, log2_align, class },
     );
 
-    const page_list = &self.pages[size_class];
+    const page_list = &self.pages[class];
     const page_node = page_list.first orelse page_node: {
         @setCold(true);
-        log.debug("no pages with size class {d}", .{size_class});
+        log.debug("no pages with size class {d}", .{class});
         break :page_node self.initPage(aligned_size) catch return null;
     };
 
@@ -240,119 +242,18 @@ fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
     segment.deinit();
 }
 
-fn slotSizeAligned(len: usize, log2_align: u8) u32 {
+fn slotSizeAligned(len: u32, log2_align: u8) u32 {
     const next_size = indexToSize(sizeClass(len));
     const next_size_log2_align = @ctz(next_size);
-    const alignment = @as(usize, 1) << @intCast(ShiftInt, log2_align);
-    return if (log2_align <= next_size_log2_align)
-        @intCast(u32, len)
-    else
-        @intCast(u32, len - 1 + alignment);
-}
-
-const size_class_count = sizeClass(constants.max_slot_size_large_page);
-
-const step_1_usize_count = 8;
-const step_2_usize_count = 16;
-const general_step_bits = 3;
-const step_shift = general_step_bits - 1;
-const step_divisions = 1 << step_shift;
-const step_size_base = @sizeOf(usize) * step_2_usize_count / step_divisions;
-const step_offset = offset: {
-    const b = leading_bit_index(step_2_usize_count);
-    const extra_bits = (step_2_usize_count + 1) >> (b - step_shift);
-    break :offset (b << step_shift) + extra_bits - first_general_index;
-};
-
-const first_general_index = step_1_usize_count + (step_2_usize_count - step_1_usize_count) / 2;
-const last_special_size = step_2_usize_count * @sizeOf(usize);
-
-const ShiftInt = std.math.Log2Int(usize);
-
-fn indexToSize(index: usize) u32 {
-    if (index < first_general_index) {
-        if (index < step_1_usize_count) {
-            return @intCast(u32, @sizeOf(usize) * (index + 1));
-        } else {
-            return @intCast(u32, (index - step_1_usize_count + 1) * 2 * @sizeOf(usize) +
-                step_1_usize_count * @sizeOf(usize));
-        }
-    } else {
-        const s = index - first_general_index + 1;
-        const size_shift = @intCast(ShiftInt, s / step_divisions);
-        const i = s % step_divisions;
-
-        return @intCast(u32, last_special_size + i * step_size_base * 1 << size_shift);
+    if (log2_align <= next_size_log2_align)
+        return @intCast(u32, len)
+    else {
+        const alignment = @as(u32, 1) << @intCast(ShiftIntU32, log2_align);
+        return len + alignment - 1;
     }
 }
 
-fn sizeClass(len: usize) usize {
-    assert(len > 0);
-    const usize_count = (len + @sizeOf(usize) - 1) / @sizeOf(usize);
-    if (usize_count <= step_1_usize_count) {
-        return usize_count - 1;
-    } else if (usize_count <= step_2_usize_count) {
-        return (usize_count - step_1_usize_count - 1) / 2 + step_1_usize_count;
-    } else {
-        const b = leading_bit_index(usize_count - 1);
-        const extra_bits = (usize_count - 1) >> (b - step_shift);
-        return ((@as(usize, b) << step_shift) + extra_bits) - step_offset;
-    }
-}
-
-inline fn leading_bit_index(a: usize) ShiftInt {
-    return @intCast(ShiftInt, @bitSizeOf(usize) - 1 - @clz(a));
-}
-
-test indexToSize {
-    try std.testing.expectEqual(indexToSize(first_general_index - 1), last_special_size);
-    try std.testing.expectEqual(
-        indexToSize(first_general_index),
-        last_special_size + last_special_size / step_divisions,
-    );
-
-    for (0..step_1_usize_count) |i| {
-        try std.testing.expectEqual((i + 1) * @sizeOf(usize), indexToSize(i));
-    }
-    for (step_1_usize_count..first_general_index) |i| {
-        try std.testing.expectEqual(
-            ((step_1_usize_count) + (i - step_1_usize_count + 1) * 2) * @sizeOf(usize),
-            indexToSize(i),
-        );
-    }
-    for (first_general_index..size_class_count) |i| {
-        const extra = (i - first_general_index) % step_divisions + 1;
-        const rounded_index = step_divisions * ((i - first_general_index) / step_divisions);
-        const base = first_general_index + rounded_index;
-        const base_size = indexToSize(base - 1);
-        try std.testing.expectEqual(base_size + extra * base_size / step_divisions, indexToSize(i));
-    }
-}
-
-test sizeClass {
-    try std.testing.expectEqual(sizeClass(last_special_size) + 1, sizeClass(last_special_size + 1));
-    try std.testing.expectEqual(@as(usize, first_general_index - 1), sizeClass(last_special_size));
-    try std.testing.expectEqual(@as(usize, first_general_index), sizeClass(last_special_size + 1));
-    try std.testing.expectEqual(
-        @as(usize, first_general_index),
-        sizeClass(last_special_size + last_special_size / step_divisions - 1),
-    );
-}
-
-test "sizeClass inverse of indexToSize" {
-    for (0..size_class_count) |i| {
-        try std.testing.expectEqual(i, sizeClass(indexToSize(i)));
-    }
-
-    for (1..@sizeOf(usize) + 1) |size| {
-        try std.testing.expectEqual(indexToSize(0), indexToSize(sizeClass(size)));
-    }
-    for (1..size_class_count) |i| {
-        for (indexToSize(i - 1) + 1..indexToSize(i) + 1) |size| {
-            try std.testing.expectEqual(indexToSize(i), indexToSize(sizeClass(size)));
-        }
-    }
-}
+const size_class_count = size_class.count;
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -360,6 +261,10 @@ const assert = std.debug.assert;
 const log = @import("log.zig");
 
 const constants = @import("constants.zig");
+
+const size_class = @import("size_class.zig");
+const indexToSize = size_class.branching.toSize;
+const sizeClass = size_class.branching.ofSize;
 
 const Page = @import("Page.zig");
 const Segment = @import("Segment.zig");
