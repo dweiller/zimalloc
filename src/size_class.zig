@@ -1,6 +1,6 @@
 const ShiftInt = std.math.Log2Int(usize);
 
-pub const count = branching.ofSize(constants.max_slot_size_large_page);
+pub const count = branching.ofSize(constants.max_slot_size_large_page) + 1;
 
 const log2_divisions = 2;
 const step_divisions = 1 << log2_divisions;
