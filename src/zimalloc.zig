@@ -5,6 +5,7 @@ test {
     _ = @import("list.zig");
     _ = @import("Page.zig");
     _ = @import("Segment.zig");
+    _ = @import("size_class.zig");
 }
 
 test "basic validation" {
