@@ -74,7 +74,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
         return @intToPtr([*]u8, aligned_address);
     }
 
-    if (!isNullPageNode(page_node)) {
+    if (isNullPageNode(page_node)) unlikely() else {
         page_node.data.migrateFreeList();
     }
 
@@ -86,7 +86,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 
     log.debugVerbose("alloc slow path", .{});
     const slot = slot: {
-        if (!isNullPageNode(page_node)) {
+        if (isNullPageNode(page_node)) unlikely() else {
             const end = page_node;
             var node = page_node.next;
             var prev = page_node;
@@ -218,6 +218,7 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
     const class = sizeClass(slot_size);
     if (isNullPageNode(self.pages[class].head.?)) {
         // capcity == 0 means it's the null page
+        unlikely();
         self.pages[class].head = page_node;
     } else {
         self.pages[class].prependOne(page_node);
@@ -278,6 +279,12 @@ const null_page_list_node = Page.List.Node{
 
 fn isNullPageNode(page_node: *const Page.List.Node) bool {
     return page_node == &null_page_list_node;
+}
+
+// TODO: replace this attempted workaround when https://github.com/ziglang/zig/issues/5177
+//       gets implemented
+fn unlikely() void {
+    @setCold(true);
 }
 
 const size_class_count = size_class.count;
