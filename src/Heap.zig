@@ -11,7 +11,11 @@ pub fn init(options: Options) Heap {
     _ = options;
     return .{
         .thread_id = std.Thread.getCurrentId(),
-        .pages = .{Page.List{ .head = null }} ** size_class_count,
+        // WARNING: It is important that `isNullPageNode()` is used to check if the head of a page
+        // list is null before any operation that may modify it or try to access the next/prev pages
+        // as these pointers are undefined. Use of @constCast here should be safe as long as
+        // `isNullPageNode()` is used to check before any modifications are attempted.
+        .pages = .{Page.List{ .head = @constCast(&null_page_list_node) }} ** size_class_count,
         .segments = null,
         .huge_allocations = HugeAllocTable.init(std.heap.page_allocator),
     };
@@ -61,11 +65,8 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     );
 
     const page_list = &self.pages[class];
-    const page_node = page_list.head orelse page_node: {
-        @setCold(true);
-        log.debug("no pages with size class {d}", .{class});
-        break :page_node self.initPage(aligned_size) catch return null;
-    };
+    // we can use page_list.head is guaranteed non-null (see init())
+    const page_node = page_list.head.?;
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc fast path", .{});
@@ -73,7 +74,10 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
         return @intToPtr([*]u8, aligned_address);
     }
 
-    page_node.data.migrateFreeList();
+    if (!isNullPageNode(page_node)) {
+        page_node.data.migrateFreeList();
+    }
+
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc slow path (first page)", .{});
         const aligned_address = std.mem.alignForwardLog2(@ptrToInt(buf.ptr), log2_align);
@@ -81,30 +85,34 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     }
 
     log.debugVerbose("alloc slow path", .{});
-    const end = page_node;
-    var node = page_node.next;
-    var prev = page_node;
-    const slot = slot: while (node != end) {
-        node.data.migrateFreeList();
-        const in_use_count = node.data.used_count - node.data.other_freed;
-        if (in_use_count == 0) {
-            deinitPage(node, page_list) catch |err|
-                log.warn("could not madvise page: {s}", .{@errorName(err)});
-            node = prev.next; // deinitPage changed prev.next to node.next
-            const segment = Segment.ofPtr(node);
-            if (segment.init_set.count() == 0) {
-                self.releaseSegment(segment);
+    const slot = slot: {
+        if (!isNullPageNode(page_node)) {
+            const end = page_node;
+            var node = page_node.next;
+            var prev = page_node;
+            while (node != end) {
+                node.data.migrateFreeList();
+                const in_use_count = node.data.used_count - node.data.other_freed;
+                if (in_use_count == 0) {
+                    deinitPage(node, page_list) catch |err|
+                        log.warn("could not madvise page: {s}", .{@errorName(err)});
+                    node = prev.next; // deinitPage changed prev.next to node.next
+                    const segment = Segment.ofPtr(node);
+                    if (segment.init_set.count() == 0) {
+                        self.releaseSegment(segment);
+                    }
+                } else if (in_use_count < node.data.capacity) {
+                    log.debugVerbose("found suitable page", .{});
+                    // rotate page list
+                    page_list.head = node;
+                    break :slot node.data.allocSlotFast().?;
+                } else {
+                    prev = node;
+                    node = node.next;
+                }
             }
-        } else if (in_use_count < node.data.capacity) {
-            log.debugVerbose("found suitable page", .{});
-            // rotate page list
-            page_list.head = node;
-            break :slot node.data.allocSlotFast().?;
-        } else {
-            prev = node;
-            node = node.next;
         }
-    } else {
+
         log.debugVerbose("no suitable pre-existing page found", .{});
         const new_page = self.initPage(aligned_size) catch return null;
         break :slot new_page.data.allocSlotFast().?;
@@ -207,7 +215,13 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
     );
     page.init(slot_size, segment.pageSlice(index));
     segment.init_set.set(index);
-    self.pages[sizeClass(slot_size)].prependOne(page_node);
+    const class = sizeClass(slot_size);
+    if (isNullPageNode(self.pages[class].head.?)) {
+        // capcity == 0 means it's the null page
+        self.pages[class].head = page_node;
+    } else {
+        self.pages[class].prependOne(page_node);
+    }
     return page_node;
 }
 
@@ -244,6 +258,26 @@ fn slotSizeAligned(len: u32, log2_align: u8) u32 {
         const alignment = @as(u32, 1) << @intCast(ShiftIntU32, log2_align);
         return len + alignment - 1;
     }
+}
+
+// this is used to represent an uninitialised page list so we can avoid
+// a branch in the fast allocation path
+const null_page_list_node = Page.List.Node{
+    .data = Page{
+        .local_free_list = .{ .first = null, .last = undefined },
+        .alloc_free_list = .{ .first = null, .last = undefined },
+        .other_free_list = .{ .first = null, .last = undefined },
+        .used_count = 0,
+        .other_freed = 0,
+        .capacity = 0,
+        .slot_size = 0,
+    },
+    .next = undefined,
+    .prev = undefined,
+};
+
+fn isNullPageNode(page_node: *const Page.List.Node) bool {
+    return page_node == &null_page_list_node;
 }
 
 const size_class_count = size_class.count;
