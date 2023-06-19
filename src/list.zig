@@ -1,4 +1,4 @@
-pub fn List(comptime T: type) type {
+pub fn Appendable(comptime T: type) type {
     return struct {
         first: ?*Node,
         /// only valid if first != null
@@ -32,43 +32,97 @@ pub fn List(comptime T: type) type {
     };
 }
 
-pub fn OffsetList(comptime T: type, comptime OffsetInt: type) type {
+pub fn Circular(comptime T: type) type {
     return struct {
-        first: ?OffsetInt,
-        last: OffsetInt,
+        head: ?*Node,
 
         const Self = @This();
 
         pub const Node = struct {
             data: T,
-            next: ?OffsetInt,
+            next: *Node,
+            prev: *Node,
+
+            /// join the lists containing `self` and `other` so that `self.next == other`
+            /// ┌─self.prev──self──other──other.next─┐
+            /// │                                    │
+            /// └────────self.next──other.prev───────┘
+            pub fn insertAfter(self: *Node, other: *Node) void {
+                self.next.prev = other.prev;
+                other.prev.next = self.next;
+
+                self.next = other;
+                other.prev = self;
+            }
+
+            /// join the lists containing `self` and `other` so that `self.prev == other`
+            /// ┌─other.prev──other──self──self.next─┐
+            /// │                                    │
+            /// └────────other.next──self.prev───────┘
+            pub fn insertBefore(self: *Node, other: *Node) void {
+                other.insertAfter(self);
+            }
+
+            pub fn remove(self: *Node) void {
+                self.prev.next = self.next;
+                self.next.prev = self.prev;
+
+                self.next = self;
+                self.prev = self;
+            }
         };
 
-        pub fn popFirst(self: *Self, base: *anyopaque) ?*Node {
-            const node_offset = self.first orelse return null;
-            const node = @intToPtr(*Node, node_offset + @ptrToInt(base));
-            self.first = node.next;
-            return node;
+        pub fn popFirst(self: *Self) ?*Node {
+            if (self.head) |node| {
+                node.remove();
+                return node;
+            }
+            return null;
         }
 
-        // asserts that std.math.maxInt(OffsetInt) >= @ptrToInt(node) - @ptrToInt(base) >= 0;
-        pub fn prepend(self: *Self, base: *anyopaque, node: *Node) void {
-            node.next = self.first;
-            self.first = offset(base, node);
+        pub fn popLast(self: *Self) ?*Node {
+            if (self.head) |node| {
+                const last = node.prev;
+                last.remove();
+                return last;
+            }
+            return null;
         }
 
-        pub fn appendList(self: *Self, other: *Self) void {
-            self.last.next = other.first;
-            self.last = other.last;
+        pub fn remove(self: *Self, node: *Node) void {
+            if (node.next == node) {
+                assert(node.prev == node);
+                self.head = null;
+                return;
+            }
+            node.remove();
         }
 
-        fn offset(base: *anyopaque, other: *anyopaque) OffsetInt {
-            const base_address = @ptrToInt(base);
-            const other_address = @ptrToInt(other);
-            assert(base_address <= other_address);
-            assert(other_address - base_address <= std.math.maxInt(OffsetInt));
-            return @intCast(OffsetInt, other_address - base_address);
+        pub fn prependNodes(self: *Self, node: *Node) void {
+            if (self.head) |first| {
+                first.insertBefore(node.prev);
+            }
+            self.head = node;
         }
+
+        pub fn prependOne(self: *Self, node: *Node) void {
+            assert(node.next == node and node.prev == node);
+            self.prependNodes(node);
+        }
+
+        pub fn appendNodes(self: *Self, node: *Node) void {
+            if (self.head) |first| {
+                first.insertBefore(node.prev);
+            } else {
+                self.head = node;
+            }
+        }
+
+        pub fn appendOne(self: *Self, node: *Node) void {
+            assert(node.next == node and node.prev == node);
+            self.appendNodes(node);
+        }
+
     };
 }
 

@@ -10,7 +10,12 @@ const Page = @This();
 
 const SlotCountInt = std.math.IntFittingRange(0, constants.small_page_size / @sizeOf(usize));
 
-pub const List = @import("list.zig").List(Page);
+pub const List = list.Circular(Page);
+pub const FreeList = list.Appendable(void);
+
+comptime {
+    assert(@sizeOf(FreeList.Node) <= constants.min_slot_size_usize_count * @sizeOf(usize));
+}
 
 pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) void {
     const capacity = @intCast(u16, bytes.len / slot_size);
@@ -142,16 +147,11 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
     )) |old_value| node.next = old_value;
 }
 
-const FreeList = @import("list.zig").List(void);
-const ThreadSafeFreeList = struct {};
-
-const min_slot_size = @sizeOf(FreeList.Node);
-
 const std = @import("std");
 const assert = std.debug.assert;
 
 const log = @import("log.zig");
 const constants = @import("constants.zig");
-const options = @import("options");
+const list = @import("list.zig");
 
 const Segment = @import("Segment.zig");

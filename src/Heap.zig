@@ -11,7 +11,7 @@ pub fn init(options: Options) Heap {
     _ = options;
     return .{
         .thread_id = std.Thread.getCurrentId(),
-        .pages = .{Page.List{ .first = null, .last = undefined }} ** size_class_count,
+        .pages = .{Page.List{ .head = null }} ** size_class_count,
         .segments = null,
         .huge_allocations = HugeAllocTable.init(std.heap.page_allocator),
     };
@@ -61,7 +61,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     );
 
     const page_list = &self.pages[class];
-    const page_node = page_list.first orelse page_node: {
+    const page_node = page_list.head orelse page_node: {
         @setCold(true);
         log.debug("no pages with size class {d}", .{class});
         break :page_node self.initPage(aligned_size) catch return null;
@@ -81,32 +81,28 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     }
 
     log.debugVerbose("alloc slow path", .{});
-    var page_iter = page_node.next;
+    const end = page_node;
+    var node = page_node.next;
     var prev = page_node;
-    const slot = slot: while (page_iter) |node| {
+    const slot = slot: while (node != end) {
         node.data.migrateFreeList();
         const in_use_count = node.data.used_count - node.data.other_freed;
         if (in_use_count == 0) {
-            deinitPage(node, page_list, prev) catch |err|
+            deinitPage(node, page_list) catch |err|
                 log.warn("could not madvise page: {s}", .{@errorName(err)});
-            page_iter = prev.next; // deinitPage changed prev.next to node.next
+            node = prev.next; // deinitPage changed prev.next to node.next
             const segment = Segment.ofPtr(node);
             if (segment.init_set.count() == 0) {
                 self.releaseSegment(segment);
             }
         } else if (in_use_count < node.data.capacity) {
             log.debugVerbose("found suitable page", .{});
-            // rotate free list
-            if (page_list.first) |first| {
-                page_list.last.next = first;
-            }
-            prev.next = null;
-            page_list.last = prev;
-            page_list.first = node;
+            // rotate page list
+            page_list.head = node;
             break :slot node.data.allocSlotFast().?;
         } else {
             prev = node;
-            page_iter = node.next;
+            node = node.next;
         }
     } else {
         log.debugVerbose("no suitable pre-existing page found", .{});
@@ -201,7 +197,9 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
     };
     assert(index < segment.page_count);
 
-    const page_node = &segment.pages[index];
+    var page_node = &segment.pages[index];
+    page_node.next = page_node;
+    page_node.prev = page_node;
     const page = &page_node.data;
     log.debug(
         "initialising page {d} with slot size {d} in segment {*}",
@@ -209,22 +207,17 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
     );
     page.init(slot_size, segment.pageSlice(index));
     segment.init_set.set(index);
-    self.pages[sizeClass(slot_size)].prepend(page_node);
+    self.pages[sizeClass(slot_size)].prependOne(page_node);
     return page_node;
 }
 
 fn deinitPage(
     page_node: *Page.List.Node,
     page_list: *Page.List,
-    prev_page_node: *Page.List.Node,
 ) !void {
-    assert(page_list.first != null);
+    assert(page_list.head != null);
 
-    if (page_list.last == page_node) {
-        assert(page_node.next == null);
-        page_list.last = prev_page_node;
-    } else assert(page_node.next != null);
-    prev_page_node.next = page_node.next;
+    page_list.remove(page_node);
 
     defer page_node.* = undefined;
     try page_node.data.deinit();

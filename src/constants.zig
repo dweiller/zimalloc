@@ -11,6 +11,7 @@ pub const small_page_size_first = small_page_size - segment_first_page_offset;
 pub const small_page_shift = std.math.log2(small_page_size);
 pub const large_page_shift = std.math.log2(segment_alignment);
 
+pub const min_slot_size_usize_count = 1;
 pub const min_slots_per_page = 8;
 pub const max_slot_size_small_page = small_page_size / min_slots_per_page;
 pub const max_slot_size_large_page = segment_size / min_slots_per_page;
