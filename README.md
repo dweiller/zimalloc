@@ -12,9 +12,9 @@ To use the allocator in your own project you can use the Zig package manager by 
 ```zig
 pub fn build(b: *std.Build) void {
     // -- snip --
-    const mesh = b.dependency("zimalloc").module("zimalloc"); // get the zimalloc module
+    const zimalloc = b.dependency("zimalloc").module("zimalloc"); // get the zimalloc module
     // -- snip --
-    exe.addModule(mesh); // add the zimalloc module as a depenency of exe
+    exe.addModule(zimalloc); // add the zimalloc module as a depenency of exe
     // -- snip --
 }
 ```
