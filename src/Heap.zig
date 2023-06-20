@@ -5,10 +5,7 @@ huge_allocations: HugeAllocTable,
 
 const Heap = @This();
 
-pub const Options = struct {};
-
-pub fn init(options: Options) Heap {
-    _ = options;
+pub fn init() Heap {
     return .{
         .thread_id = std.Thread.getCurrentId(),
         // WARNING: It is important that `isNullPageNode()` is used to check if the head of a page
