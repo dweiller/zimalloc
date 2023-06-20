@@ -29,7 +29,7 @@ initialise an instance of the allocator as follows:
 ```zig
 const zimalloc = @import("zimalloc");
 pub fn main() !void {
-    var gpa = try zimalloc.Allocator.init();
+    var gpa = try zimalloc.Allocator(.{}){};
     defer gpa.deinit();
 
     const allocator = gpa.allocator();

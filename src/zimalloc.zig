@@ -1,4 +1,5 @@
-pub const Allocator = @import("Heap.zig");
+pub const Allocator = @import("allocator.zig").Allocator;
+pub const Heap = @import("Heap.zig");
 
 test {
     _ = @import("Heap.zig");
@@ -6,10 +7,11 @@ test {
     _ = @import("Page.zig");
     _ = @import("Segment.zig");
     _ = @import("size_class.zig");
+    _ = @import("allocator.zig");
 }
 
 test "basic validation" {
-    var gpa = Allocator.init();
+    var gpa = Allocator(.{}){};
     defer gpa.deinit();
 
     const allocator = gpa.allocator();
@@ -21,7 +23,7 @@ test "basic validation" {
 }
 
 test "create/destroy loop" {
-    var gpa = Allocator.init();
+    var gpa = Allocator(.{}){};
     defer gpa.deinit();
     const allocator = gpa.allocator();
 
