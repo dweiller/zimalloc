@@ -9,7 +9,7 @@ test {
 }
 
 test "basic validation" {
-    var gpa = Allocator.init(.{});
+    var gpa = Allocator.init();
     defer gpa.deinit();
 
     const allocator = gpa.allocator();
@@ -21,7 +21,7 @@ test "basic validation" {
 }
 
 test "create/destroy loop" {
-    var gpa = Allocator.init(.{});
+    var gpa = Allocator.init();
     defer gpa.deinit();
     const allocator = gpa.allocator();
 
