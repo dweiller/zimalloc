@@ -91,7 +91,7 @@ pub fn Allocator(comptime config: Config) type {
                 const metadata = &self.thread_heaps.uncheckedAt(heap_index).metadata;
                 metadata.mutex.lock();
                 defer metadata.mutex.unlock();
-                return metadata.map.get(@ptrToInt(ptr));
+                return metadata.map.get(@intFromPtr(ptr));
             }
         } else struct {};
 
@@ -107,7 +107,7 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
-            assert(std.mem.isAligned(@ptrToInt(ctx), @alignOf(@This())));
+            assert(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())));
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
             if (config.memory_limit) |limit| {
@@ -157,7 +157,7 @@ pub fn Allocator(comptime config: Config) type {
             }
 
             if (config.track_allocations) {
-                metadata.map.putAssumeCapacityNoClobber(@ptrToInt(allocation.ptr), .{ .size = len });
+                metadata.map.putAssumeCapacityNoClobber(@intFromPtr(allocation.ptr), .{ .size = len });
                 metadata.mutex.unlock();
             }
 
@@ -165,7 +165,7 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
-            assert(std.mem.isAligned(@ptrToInt(ctx), @alignOf(@This())));
+            assert(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())));
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
             const new_total_allocated_memory = if (config.memory_limit) |_|
@@ -192,7 +192,7 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
-            assert(std.mem.isAligned(@ptrToInt(ctx), @alignOf(@This())));
+            assert(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())));
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
             const segment = Segment.ofPtr(buf.ptr);
@@ -213,7 +213,7 @@ pub fn Allocator(comptime config: Config) type {
             if (config.track_allocations) {
                 const heap_data = self.thread_heaps.uncheckedAt(heap_index);
                 heap_data.metadata.mutex.lock();
-                assert(heap_data.metadata.map.remove(@ptrToInt(buf.ptr)));
+                assert(heap_data.metadata.map.remove(@intFromPtr(buf.ptr)));
                 heap_data.metadata.mutex.unlock();
             }
 

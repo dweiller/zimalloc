@@ -96,7 +96,7 @@ pub fn migrateFreeList(self: *Page) void {
             while (node) |n| : (node = n.next) c += 1;
             break :count c;
         };
-        log.debug("updating other_freed: {d}, other_last: {*}", .{count, other_free_list_last});
+        log.debug("updating other_freed: {d}, other_last: {*}", .{ count, other_free_list_last });
         _ = @atomicRmw(SlotCountInt, &self.other_freed, .Sub, count, .AcqRel);
 
         self.alloc_free_list = .{ .first = head, .last = other_free_list_last };
@@ -120,11 +120,11 @@ pub fn containingSlot(self: *const Page, ptr: *anyopaque) Slot {
 /// returns the `Slot` containing `bytes.ptr`
 pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyopaque) Slot {
     const page_slice = segment.pageSlice(segment.pageIndex(ptr));
-    const page_address = @ptrToInt(page_slice.ptr);
-    const bytes_address = @ptrToInt(ptr);
+    const page_address = @intFromPtr(page_slice.ptr);
+    const bytes_address = @intFromPtr(ptr);
     const index = (bytes_address - page_address) / self.slot_size;
     const slot_address = page_address + index * self.slot_size;
-    const slot = @intToPtr([*]align(8) u8, slot_address)[0..self.slot_size];
+    const slot = @ptrFromInt([*]align(8) u8, slot_address)[0..self.slot_size];
     assert(slot_address <= bytes_address);
     return slot;
 }

@@ -81,7 +81,7 @@ fn log(
 }
 
 fn logEnabled(comptime message_level: std.log.Level) bool {
-    return @enumToInt(message_level) <= @enumToInt(level);
+    return @intFromEnum(message_level) <= @intFromEnum(level);
 }
 
 const std = @import("std");
