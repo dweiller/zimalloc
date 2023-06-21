@@ -168,10 +168,10 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, buf.ptr);
     if (std.Thread.getCurrentId() == self.thread_id) {
-        log.debugVerbose("freeing slot {*} to local freelist", .{slot.ptr});
+        log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
         page.freeLocalAligned(slot);
     } else {
-        log.debugVerbose("freeing slot {*} to other freelist", .{slot.ptr});
+        log.debugVerbose("moving slot {*} to other freelist on thread {d}", .{ slot.ptr, self.thread_id });
         page.freeOtherAligned(slot);
     }
     return page.slot_size;
