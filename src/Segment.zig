@@ -2,6 +2,7 @@ page_shift: u6,
 init_set: PageBitSet,
 pages: [small_page_count]Page.List.Node,
 page_count: u32,
+heap: *Heap,
 next: ?Ptr,
 prev: ?Ptr,
 
@@ -29,7 +30,7 @@ pub fn ofPtr(ptr: *const anyopaque) Ptr {
     return @intToPtr(Ptr, address);
 }
 
-pub fn init(page_size: PageSize) ?Ptr {
+pub fn init(heap: *Heap, page_size: PageSize) ?Ptr {
     const raw_ptr = allocateSegment() orelse return null;
     const self = @ptrCast(Ptr, raw_ptr);
     switch (page_size) {
@@ -39,6 +40,7 @@ pub fn init(page_size: PageSize) ?Ptr {
                 .page_shift = small_page_shift,
                 .page_count = small_page_count,
                 .init_set = PageBitSet.initEmpty(),
+                .heap = heap,
                 .next = null,
                 .prev = null,
             };
@@ -49,6 +51,7 @@ pub fn init(page_size: PageSize) ?Ptr {
                 .page_shift = large_page_shift,
                 .page_count = 1,
                 .init_set = PageBitSet.initEmpty(),
+                .heap = heap,
                 .next = null,
                 .prev = null,
             };
@@ -107,6 +110,7 @@ const PageBitSet = std.StaticBitSet(small_page_count);
 const std = @import("std");
 const assert = std.debug.assert;
 
+const Heap = @import("Heap.zig");
 const Page = @import("Page.zig");
 
 const constants = @import("constants.zig");

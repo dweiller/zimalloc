@@ -1,4 +1,6 @@
-var allocator_instance = zimalloc.Allocator(.{}){};
+var allocator_instance = zimalloc.Allocator(.{
+    .track_allocations = true,
+}){};
 const allocator = allocator_instance.allocator();
 
 const AllocData = struct {
@@ -19,47 +21,50 @@ export fn malloc(len: usize) ?*anyopaque {
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
     log.debug("realloc {?*} {d}", .{ ptr_opt, len });
     if (ptr_opt) |ptr| {
-        // assert that the pointer was allocated
-        const old_address = @ptrToInt(ptr);
-        const alloc = metadata.get(old_address) orelse {
+        const alloc = allocator_instance.getMetadata(ptr) catch {
             invalid("invalid realloc: {*} - no valid heap", .{ptr});
+            return null;
+        } orelse {
+            invalid("invalid realloc: {*}", .{ptr});
             return null;
         };
 
-        const slice = @ptrCast([*]u8, ptr)[0..alloc.size];
+        const old_slice = @ptrCast([*]u8, ptr)[0..alloc.size];
 
-        const reallocated = allocator.realloc(slice, len) catch {
+        if (allocator.rawResize(old_slice, 0, len, @returnAddress())) {
+            log.debug("keeping old pointer", .{});
+            return ptr;
+        }
+
+        const new_mem = allocator.rawAlloc(len, 0, @returnAddress()) orelse {
             log.debug("out of memory", .{});
             return null;
         };
-        const new_address = @ptrToInt(reallocated.ptr);
 
-        const new_alloc = AllocData{ .size = len };
+        const copy_len = @min(len, old_slice.len);
+        @memcpy(new_mem[0..copy_len], old_slice);
 
-        if (new_address == old_address) {
-            metadata.put(new_address, new_alloc) catch unreachable;
-        } else {
-            assert(metadata.remove(old_address));
-            metadata.putNoClobber(new_address, new_alloc) catch unreachable;
-        }
-        log.debug("reallocated pointer: {*}", .{reallocated});
-        return reallocated.ptr;
+        allocator.rawFree(old_slice, 0, @returnAddress());
+
+        log.debug("reallocated pointer: {*}", .{new_mem});
+        return new_mem;
     }
-    log.debug("out of memory", .{});
-    return null;
+    return allocateBytes(len, false);
 }
 
 export fn free(ptr_opt: ?*anyopaque) void {
     log.debug("free {?*}", .{ptr_opt});
     if (ptr_opt) |ptr| {
-        const alloc = metadata.get(@ptrToInt(ptr)) orelse {
+        const alloc = allocator_instance.getMetadata(ptr) catch {
             invalid("invalid free: {*} - no valid heap", .{ptr});
+            return;
+        } orelse {
+            invalid("invalid free: {*}", .{ptr});
             return;
         };
 
         const slice = @ptrCast([*]u8, ptr)[0..alloc.size];
         allocator.free(slice);
-        assert(metadata.remove(@ptrToInt(ptr)));
     }
 }
 
@@ -71,14 +76,8 @@ export fn calloc(size: usize, count: usize) ?*anyopaque {
 
 fn allocateBytes(byte_count: usize, comptime zero: bool) ?*anyopaque {
     if (byte_count == 0) return null;
-    metadata.ensureUnusedCapacity(1) catch {
-        log.debug("could not allocate metadata", .{});
-        return null;
-    };
 
     if (allocator.rawAlloc(byte_count, 0, @returnAddress())) |ptr| {
-        metadata.putAssumeCapacityNoClobber(@ptrToInt(ptr), .{ .size = byte_count });
-
         const min_alignment = constants.min_slot_size_usize_count * @sizeOf(usize);
         const casted_ptr = @alignCast(min_alignment, ptr);
         @memset(casted_ptr[0..byte_count], if (zero) 0 else undefined);
