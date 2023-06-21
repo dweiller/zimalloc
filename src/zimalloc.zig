@@ -2,12 +2,14 @@ pub const Allocator = @import("allocator.zig").Allocator;
 pub const Heap = @import("Heap.zig");
 
 test {
+    _ = Allocator(.{ .memory_limit = 4096 });
     _ = @import("Heap.zig");
     _ = @import("list.zig");
     _ = @import("Page.zig");
     _ = @import("Segment.zig");
     _ = @import("size_class.zig");
     _ = @import("allocator.zig");
+    _ = @import("libzimalloc.zig");
 }
 
 test "basic validation" {
