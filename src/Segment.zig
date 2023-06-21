@@ -26,8 +26,8 @@ pub fn pageSize(slot_size: u32) PageSize {
 }
 
 pub fn ofPtr(ptr: *const anyopaque) Ptr {
-    const address = std.mem.alignBackward(@ptrToInt(ptr), segment_alignment);
-    return @intToPtr(Ptr, address);
+    const address = std.mem.alignBackward(usize, @intFromPtr(ptr), segment_alignment);
+    return @ptrFromInt(Ptr, address);
 }
 
 pub fn init(heap: *Heap, page_size: PageSize) ?Ptr {
@@ -65,20 +65,20 @@ pub fn deinit(self: Ptr) void {
 }
 
 pub fn pageIndex(self: ConstPtr, ptr: *anyopaque) usize {
-    assert(@ptrToInt(self) < @ptrToInt(ptr));
-    return (@ptrToInt(ptr) - @ptrToInt(self)) >> self.page_shift;
+    assert(@intFromPtr(self) < @intFromPtr(ptr));
+    return (@intFromPtr(ptr) - @intFromPtr(self)) >> self.page_shift;
 }
 
 pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
     if (index == 0) {
-        const segment_end = @ptrToInt(self) + @sizeOf(@This());
-        const address = std.mem.alignForward(segment_end, std.mem.page_size);
+        const segment_end = @intFromPtr(self) + @sizeOf(@This());
+        const address = std.mem.alignForward(usize, segment_end, std.mem.page_size);
         const page_size = (@as(usize, 1) << self.page_shift) - segment_first_page_offset;
-        return @alignCast(std.mem.page_size, @intToPtr([*]u8, address))[0..page_size];
+        return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..page_size];
     } else {
         assert(self.page_shift == small_page_shift);
-        const address = @ptrToInt(self) + index * small_page_size;
-        return @alignCast(std.mem.page_size, @intToPtr([*]u8, address))[0..small_page_size];
+        const address = @intFromPtr(self) + index * small_page_size;
+        return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..small_page_size];
     }
 }
 
@@ -87,8 +87,8 @@ fn allocateSegment() ?*align(segment_alignment) [segment_size]u8 {
     const prot = std.os.PROT.READ | std.os.PROT.WRITE;
     const flags = std.os.MAP.PRIVATE | std.os.MAP.ANONYMOUS;
     const unaligned = std.os.mmap(null, mmap_length, prot, flags, -1, 0) catch return null;
-    const unaligned_address = @ptrToInt(unaligned.ptr);
-    const aligned_address = std.mem.alignForward(unaligned_address, segment_alignment);
+    const unaligned_address = @intFromPtr(unaligned.ptr);
+    const aligned_address = std.mem.alignForward(usize, unaligned_address, segment_alignment);
     if (aligned_address == unaligned_address) {
         std.os.munmap(unaligned[segment_size..]);
         return @alignCast(segment_alignment, unaligned[0..segment_size]);

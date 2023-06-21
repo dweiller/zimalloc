@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) void {
 
     const libzimalloc_step = b.step("libzimalloc", "Build the libzimalloc shared library");
 
-    const libzimalloc_version = std.builtin.Version{ .major = 0, .minor = 0, .patch = 0 };
+    const libzimalloc_version = std.SemanticVersion{ .major = 0, .minor = 0, .patch = 0 };
     const libzimalloc = b.addSharedLibrary(.{
         .name = "zimalloc",
         .root_source_file = .{ .path = "src/libzimalloc.zig" },

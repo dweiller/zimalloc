@@ -48,10 +48,10 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
         assert(@as(u32, 1) << @intCast(ShiftIntU32, log2_align) <= std.mem.page_size);
         self.huge_allocations.ensureUnusedCapacity(1) catch return null;
         const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
-        self.huge_allocations.putAssumeCapacityNoClobber(@ptrToInt(ptr), {});
+        self.huge_allocations.putAssumeCapacityNoClobber(@intFromPtr(ptr), {});
         return .{
             .ptr = ptr,
-            .backing_size = std.mem.alignForward(len, std.mem.page_size),
+            .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
         };
     }
 
@@ -69,9 +69,9 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc fast path", .{});
-        const aligned_address = std.mem.alignForwardLog2(@ptrToInt(buf.ptr), log2_align);
+        const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
         return .{
-            .ptr = @intToPtr([*]u8, aligned_address),
+            .ptr = @ptrFromInt([*]u8, aligned_address),
             .backing_size = buf.len,
         };
     }
@@ -82,9 +82,9 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc slow path (first page)", .{});
-        const aligned_address = std.mem.alignForwardLog2(@ptrToInt(buf.ptr), log2_align);
+        const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
         return .{
-            .ptr = @intToPtr([*]u8, aligned_address),
+            .ptr = @ptrFromInt([*]u8, aligned_address),
             .backing_size = buf.len,
         };
     }
@@ -121,9 +121,9 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
         const new_page = self.initPage(aligned_size) catch return null;
         break :slot new_page.data.allocSlotFast().?;
     };
-    const aligned_address = std.mem.alignForwardLog2(@ptrToInt(slot.ptr), log2_align);
+    const aligned_address = std.mem.alignForwardLog2(@intFromPtr(slot.ptr), log2_align);
     return .{
-        .ptr = @intToPtr([*]u8, aligned_address),
+        .ptr = @ptrFromInt([*]u8, aligned_address),
         .backing_size = slot.len,
     };
 }
@@ -134,7 +134,7 @@ pub fn canResize(self: *const Heap, buf: []u8, log2_align: u8, new_len: usize, r
         .{ buf.ptr, buf.len, log2_align, new_len },
     );
 
-    if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
+    if (self.huge_allocations.contains(@intFromPtr(buf.ptr))) {
         return std.heap.page_allocator.rawResize(buf, log2_align, new_len, ret_addr);
     }
 
@@ -144,7 +144,7 @@ pub fn canResize(self: *const Heap, buf: []u8, log2_align: u8, new_len: usize, r
     const page_node = &(segment.pages[page_index]);
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, buf.ptr);
-    return @ptrToInt(buf.ptr) + new_len <= @ptrToInt(slot.ptr) + slot.len;
+    return @intFromPtr(buf.ptr) + new_len <= @intFromPtr(slot.ptr) + slot.len;
 }
 
 pub fn deallocateInSegment(
@@ -164,11 +164,11 @@ pub fn deallocateInSegment(
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, buf.ptr);
 
-    if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
+    if (self.huge_allocations.contains(@intFromPtr(buf.ptr))) {
         log.debugVerbose("freeing huge allocation {*}", .{buf.ptr});
         std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
-        assert(self.huge_allocations.remove(@ptrToInt(buf.ptr)));
-        return std.mem.alignForward(buf.len, std.mem.page_size);
+        assert(self.huge_allocations.remove(@intFromPtr(buf.ptr)));
+        return std.mem.alignForward(usize, buf.len, std.mem.page_size);
     }
 
     if (std.Thread.getCurrentId() == self.thread_id) {
