@@ -66,11 +66,17 @@ pub fn allocSlotFast(self: *Page) ?Slot {
 }
 
 pub fn migrateFreeList(self: *Page) void {
-    assert(self.alloc_free_list.first == null);
-    self.alloc_free_list = self.local_free_list;
-    self.local_free_list.first = null;
+    log.debug("migrating free list: local={?*}, other_free={?*}, other_free_last={*}", .{
+        self.local_free_list.first,
+        self.other_free_list.first,
+        self.other_free_list.last,
+    });
 
-    var other_free_list_head = self.other_free_list.first;
+    assert(self.alloc_free_list.first == null);
+
+    var other_free_list_head = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
+
+    const other_free_list_last = self.other_free_list.last;
 
     while (@cmpxchgWeak(
         ?*FreeList.Node,
@@ -83,23 +89,26 @@ pub fn migrateFreeList(self: *Page) void {
         other_free_list_head = head;
     }
 
-    var other_freed = self.other_freed;
-
-    while (@cmpxchgWeak(
-        SlotCountInt,
-        &self.other_freed,
-        other_freed,
-        0,
-        .Monotonic,
-        .Monotonic,
-    )) |freed| other_freed = freed;
-
     if (other_free_list_head) |head| {
-        assert(other_freed <= self.used_count);
-        self.used_count -= other_freed;
-        self.alloc_free_list.append(head);
+        const count: SlotCountInt = count: {
+            var c: SlotCountInt = 1;
+            var node = head.next;
+            while (node) |n| : (node = n.next) c += 1;
+            break :count c;
+        };
+        log.debug("updating other_freed: {d}, other_last: {*}", .{count, other_free_list_last});
+        _ = @atomicRmw(SlotCountInt, &self.other_freed, .Sub, count, .AcqRel);
+
+        self.alloc_free_list = .{ .first = head, .last = other_free_list_last };
+        self.alloc_free_list.appendList(self.local_free_list);
+
+        self.used_count -= count;
+    } else {
+        self.alloc_free_list = self.local_free_list;
     }
-    @fence(.AcqRel);
+
+    self.local_free_list.first = null;
+    log.debug("finished migrating free list", .{});
 }
 
 /// returns the `Slot` containing `bytes.ptr`
@@ -133,10 +142,9 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
     assert(self.containingSlot(slot.ptr).ptr == slot.ptr);
 
     const node = @ptrCast(*FreeList.Node, slot);
-    node.next = self.other_free_list.first;
+    node.next = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
     // TODO: figure out correct atomic orders
-    @fence(.AcqRel);
-    _ = @atomicRmw(SlotCountInt, &self.other_freed, .Add, 1, .Monotonic);
+    _ = @atomicRmw(SlotCountInt, &self.other_freed, .Add, 1, .AcqRel);
     while (@cmpxchgWeak(
         ?*FreeList.Node,
         &self.other_free_list.first,
@@ -145,6 +153,8 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
         .Monotonic,
         .Monotonic,
     )) |old_value| node.next = old_value;
+
+    if (node.next == null) self.other_free_list.last = node;
 }
 
 const std = @import("std");

@@ -59,7 +59,7 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
     const class = sizeClass(aligned_size);
 
     log.debugVerbose(
-        "alloc: len={d}, log2_align={d}, size_class={d}",
+        "allocate: len={d}, log2_align={d}, size_class={d}",
         .{ len, log2_align, class },
     );
 
@@ -92,10 +92,9 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
     log.debugVerbose("alloc slow path", .{});
     const slot = slot: {
         if (isNullPageNode(page_node)) unlikely() else {
-            const end = page_node;
             var node = page_node.next;
             var prev = page_node;
-            while (node != end) {
+            while (node != page_node) {
                 node.data.migrateFreeList();
                 const in_use_count = node.data.used_count - node.data.other_freed;
                 if (in_use_count == 0) {
@@ -106,8 +105,8 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
                     if (segment.init_set.count() == 0) {
                         self.releaseSegment(segment);
                     }
-                } else if (in_use_count < node.data.capacity) {
-                    log.debugVerbose("found suitable page", .{});
+                } else if (node.data.used_count < node.data.capacity) {
+                    log.debugVerbose("found suitable page: {?*}", .{node.data.local_free_list.first});
                     // rotate page list
                     page_list.head = node;
                     break :slot node.data.allocSlotFast().?;
@@ -129,9 +128,9 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
     };
 }
 
-pub fn canResize(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+pub fn canResize(self: *const Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
     log.debugVerbose(
-        "resize: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
+        "can resize: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
         .{ buf.ptr, buf.len, log2_align, new_len },
     );
 
@@ -148,12 +147,22 @@ pub fn canResize(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_add
     return @ptrToInt(buf.ptr) + new_len <= @ptrToInt(slot.ptr) + slot.len;
 }
 
-// returns the backing size of the `buf`
-pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
+pub fn deallocateInSegment(
+    self: *Heap,
+    segment: Segment.Ptr,
+    buf: []u8,
+    log2_align: u8,
+    ret_addr: usize,
+) usize {
     log.debugVerbose(
-        "free: buf.ptr={*}, buf.len={d}, log2_align={d}",
+        "deallocate: buf.ptr={*}, buf.len={d}, log2_align={d}",
         .{ buf.ptr, buf.len, log2_align },
     );
+
+    const page_index = segment.pageIndex(buf.ptr);
+    const page_node = &segment.pages[page_index];
+    const page = &page_node.data;
+    const slot = page.containingSlotSegment(segment, buf.ptr);
 
     if (self.huge_allocations.contains(@ptrToInt(buf.ptr))) {
         log.debugVerbose("freeing huge allocation {*}", .{buf.ptr});
@@ -162,11 +171,6 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize
         return std.mem.alignForward(buf.len, std.mem.page_size);
     }
 
-    const segment = Segment.ofPtr(buf.ptr);
-    const page_index = segment.pageIndex(buf.ptr);
-    const page_node = &segment.pages[page_index];
-    const page = &page_node.data;
-    const slot = page.containingSlotSegment(segment, buf.ptr);
     if (std.Thread.getCurrentId() == self.thread_id) {
         log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
         page.freeLocalAligned(slot);
@@ -175,6 +179,12 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize
         page.freeOtherAligned(slot);
     }
     return page.slot_size;
+}
+
+// returns the backing size of the `buf`
+pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
+    const segment = Segment.ofPtr(buf.ptr);
+    self.deallocateInSegment(buf, log2_align, ret_addr, segment);
 }
 
 const HugeAllocTable = std.AutoHashMap(usize, void);
@@ -212,7 +222,7 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
             }
         } else {
             const page_size = Segment.pageSize(slot_size);
-            const segment = Segment.init(page_size) orelse
+            const segment = Segment.init(self, page_size) orelse
                 return error.OutOfMemory;
             if (self.segments) |orig_head| {
                 assert(orig_head.prev == null);

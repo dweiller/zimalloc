@@ -2,7 +2,7 @@ pub const Allocator = @import("allocator.zig").Allocator;
 pub const Heap = @import("Heap.zig");
 
 test {
-    _ = Allocator(.{ .memory_limit = 4096 });
+    _ = Allocator(.{ .track_allocations = true, .memory_limit = 4096 });
     _ = @import("Heap.zig");
     _ = @import("list.zig");
     _ = @import("Page.zig");

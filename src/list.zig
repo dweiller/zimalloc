@@ -17,17 +17,20 @@ pub fn Appendable(comptime T: type) type {
             return node;
         }
 
+        /// overwrites `node.next` with `self.first`
         pub fn prepend(self: *Self, node: *Node) void {
             if (self.first == null) self.last = node;
             node.next = self.first;
             self.first = node;
         }
 
-        pub fn append(self: *Self, node: *Node) void {
-            self.last.next = node;
-            var other_iter: *Node = node;
-            while (other_iter.next) |n| : (other_iter = n) {}
-            self.last = other_iter;
+        /// asserts `self.first != null`
+        pub fn appendList(self: *Self, other: Self) void {
+            assert(self.first != null);
+            if (other.first) |node| {
+                self.last.next = node;
+                self.last = other.last;
+            }
         }
     };
 }
@@ -122,7 +125,6 @@ pub fn Circular(comptime T: type) type {
             assert(node.next == node and node.prev == node);
             self.appendNodes(node);
         }
-
     };
 }
 

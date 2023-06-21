@@ -76,7 +76,8 @@ fn log(
 ) void {
     if (comptime !logEnabled(message_level)) return;
 
-    std.options.logFn(message_level, .zimalloc, format, args);
+    const actual_fmt = "thread {d}: " ++ format;
+    std.options.logFn(message_level, .zimalloc, actual_fmt, .{std.Thread.getCurrentId()} ++ args);
 }
 
 fn logEnabled(comptime message_level: std.log.Level) bool {
