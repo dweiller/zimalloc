@@ -69,7 +69,8 @@ pub fn build(b: *std.Build) void {
 
     b.default_step = test_step;
 
-    const standalone_test_step = b.step("standalone", "Build the standalone tests");
+    const standalone_test_step = b.step("standalone", "Run the standalone tests");
+    const standalone_test_build_step = b.step("standalone-build", "Build the standalone tests");
 
     const standalone_options = b.addOptions();
     const standalone_pauses = b.option(bool, "pauses", "Insert pauses into standalone tests (default: false)") orelse false;
@@ -87,7 +88,10 @@ pub fn build(b: *std.Build) void {
         test_exe.override_dest_dir = .{ .custom = "test" };
 
         const install_step = b.addInstallArtifact(test_exe);
-        standalone_test_step.dependOn(&install_step.step);
+        standalone_test_build_step.dependOn(&install_step.step);
+
+        const run_step = b.addRunArtifact(test_exe);
+        standalone_test_step.dependOn(&run_step.step);
     }
 }
 
