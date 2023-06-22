@@ -44,11 +44,20 @@ pub const Alloc = struct {
 };
 
 pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
+    assert(self.thread_id == std.Thread.getCurrentId());
     if (len > constants.max_slot_size_large_page) {
+        log.debug("allocate: huge allocation len={d}", .{len});
         assert(@as(u32, 1) << @intCast(ShiftIntU32, log2_align) <= std.mem.page_size);
-        self.huge_allocations.ensureUnusedCapacity(1) catch return null;
+
+        self.huge_allocations.lock();
+        defer self.huge_allocations.unlock();
+
+        self.huge_allocations.ensureUnusedCapacityRaw(1) catch {
+            log.debug("could not expand huge alloc table", .{});
+            return null;
+        };
         const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
-        self.huge_allocations.putAssumeCapacityNoClobber(@intFromPtr(ptr), {});
+        self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr);
         return .{
             .ptr = ptr,
             .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
@@ -128,13 +137,13 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
     };
 }
 
-pub fn canResize(self: *const Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+pub fn resizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
     log.debugVerbose(
         "can resize: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
         .{ buf.ptr, buf.len, log2_align, new_len },
     );
 
-    if (self.huge_allocations.contains(@intFromPtr(buf.ptr))) {
+    if (self.huge_allocations.contains(buf.ptr)) {
         return std.heap.page_allocator.rawResize(buf, log2_align, new_len, ret_addr);
     }
 
@@ -147,6 +156,8 @@ pub fn canResize(self: *const Heap, buf: []u8, log2_align: u8, new_len: usize, r
     return @intFromPtr(buf.ptr) + new_len <= @intFromPtr(slot.ptr) + slot.len;
 }
 
+/// returns the backing size of the `buf`; behaviour is undefined if
+/// `self` and `segment` do not own `buf.ptr`.
 pub fn deallocateInSegment(
     self: *Heap,
     segment: Segment.Ptr,
@@ -154,22 +165,16 @@ pub fn deallocateInSegment(
     log2_align: u8,
     ret_addr: usize,
 ) usize {
+    _ = ret_addr;
     log.debugVerbose(
-        "deallocate: buf.ptr={*}, buf.len={d}, log2_align={d}",
-        .{ buf.ptr, buf.len, log2_align },
+        "deallocate in {*}: buf.ptr={*}, buf.len={d}, log2_align={d}",
+        .{ segment, buf.ptr, buf.len, log2_align },
     );
 
     const page_index = segment.pageIndex(buf.ptr);
     const page_node = &segment.pages[page_index];
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, buf.ptr);
-
-    if (self.huge_allocations.contains(@intFromPtr(buf.ptr))) {
-        log.debugVerbose("freeing huge allocation {*}", .{buf.ptr});
-        std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
-        assert(self.huge_allocations.remove(@intFromPtr(buf.ptr)));
-        return std.mem.alignForward(usize, buf.len, std.mem.page_size);
-    }
 
     if (std.Thread.getCurrentId() == self.thread_id) {
         log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
@@ -181,13 +186,27 @@ pub fn deallocateInSegment(
     return page.slot_size;
 }
 
-// returns the backing size of the `buf`
-pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
-    const segment = Segment.ofPtr(buf.ptr);
-    self.deallocateInSegment(buf, log2_align, ret_addr, segment);
+/// returns the backing size of the `buf`; behaviour is undefined if
+/// `self` does not own `buf` and it's not a large allocation
+/// The caller must lock `self.huge_allocations`.
+pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
+    log.debug("deallocate huge allocation {*}", .{buf.ptr});
+    std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
+
+    assert(self.huge_allocations.removeRaw(buf.ptr));
+    return std.mem.alignForward(usize, buf.len, std.mem.page_size);
 }
 
-const HugeAllocTable = std.AutoHashMap(usize, void);
+// returns the backing size of the `buf`; behaviour is undefined if
+// `self` does not own `buf.ptr`.
+pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
+    if (self.huge_allocations.contains(@intFromPtr(buf.ptr))) {
+        self.deallocateHuge(buf, log2_align, ret_addr);
+        assert(self.huge_allocations.removeRaw(@intFromPtr(buf.ptr)));
+    }
+    const segment = Segment.ofPtr(buf.ptr);
+    return self.deallocateInSegment(buf, log2_align, ret_addr, segment);
+}
 
 const ShiftIntU32 = std.math.Log2Int(u32);
 
@@ -198,7 +217,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
     const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
-    return self.canResize(buf, log2_align, new_len, ret_addr);
+    return self.resizeInPlace(buf, log2_align, new_len, ret_addr);
 }
 
 fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
@@ -335,5 +354,6 @@ const size_class = @import("size_class.zig");
 const indexToSize = size_class.branching.toSize;
 const sizeClass = size_class.branching.ofSize;
 
+const HugeAllocTable = @import("HugeAllocTable.zig");
 const Page = @import("Page.zig");
 const Segment = @import("Segment.zig");

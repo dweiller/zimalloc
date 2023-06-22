@@ -25,6 +25,7 @@ pub fn Allocator(comptime config: Config) type {
 
         const AllocData = struct {
             size: usize,
+            is_huge: bool,
         };
 
         const Metadata = if (config.track_allocations)
@@ -83,6 +84,23 @@ pub fn Allocator(comptime config: Config) type {
 
         pub usingnamespace if (config.track_allocations) struct {
             pub fn getMetadata(self: *Self, ptr: *anyopaque) !?AllocData {
+                // TODO: check this is valid on windows
+                // this check also covers buf.len > constants.max_slot_size_large_page
+
+                if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
+                    var heap_iter = self.thread_heaps.iterator(0);
+                    while (heap_iter.next()) |heap_data| {
+                        if (heap_data.heap.huge_allocations.contains(ptr)) {
+                            const metadata = &heap_data.metadata;
+                            metadata.mutex.lock();
+                            defer metadata.mutex.unlock();
+                            const data = metadata.map.get(@intFromPtr(ptr)) orelse return null;
+                            assert(data.is_huge);
+                            return data;
+                        }
+                    }
+                }
+
                 const segment = Segment.ofPtr(ptr);
                 const owning_heap = segment.heap;
 
@@ -157,7 +175,13 @@ pub fn Allocator(comptime config: Config) type {
             }
 
             if (config.track_allocations) {
-                metadata.map.putAssumeCapacityNoClobber(@intFromPtr(allocation.ptr), .{ .size = len });
+                metadata.map.putAssumeCapacity(
+                    @intFromPtr(allocation.ptr),
+                    .{
+                        .size = len,
+                        .is_huge = len > constants.max_slot_size_large_page,
+                    },
+                );
                 metadata.mutex.unlock();
             }
 
@@ -183,7 +207,7 @@ pub fn Allocator(comptime config: Config) type {
 
             if (self.heapIndex(owning_heap) == null) std.debug.panic("invalid resize: {*}", .{buf});
 
-            const can_resize = owning_heap.canResize(buf, log2_align, new_len, ret_addr);
+            const can_resize = owning_heap.resizeInPlace(buf, log2_align, new_len, ret_addr);
 
             // BUG: there is a bug for memory limiting here if `buf` is a huge allocation
             //      that gets shrunk to a lower os page count (see std.heap.PageAllocator.resize)
@@ -195,6 +219,32 @@ pub fn Allocator(comptime config: Config) type {
             assert(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())));
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
+            // TODO: check this is valid on windows
+            // this check also covers buf.len > constants.max_slot_size_large_page
+            if (std.mem.isAligned(@intFromPtr(buf.ptr), std.mem.page_size)) {
+                var heap_iter = self.thread_heaps.iterator(0);
+                while (heap_iter.next()) |heap_data| {
+                    heap_data.heap.huge_allocations.lock();
+                    defer heap_data.heap.huge_allocations.unlock();
+
+                    if (heap_data.heap.huge_allocations.containsRaw(buf.ptr)) {
+                        const size = heap_data.heap.deallocateHuge(buf, log2_align, ret_addr);
+
+                        if (config.memory_limit) |_| {
+                            self.stats.total_allocated_memory -= size;
+                        }
+
+                        if (config.track_allocations) {
+                            heap_data.metadata.mutex.lock();
+                            defer heap_data.metadata.mutex.unlock();
+                            assert(heap_data.metadata.map.remove(@intFromPtr(buf.ptr)));
+                        }
+                        return;
+                    }
+                }
+            }
+            assert(buf.len <= constants.max_slot_size_large_page);
+
             const segment = Segment.ofPtr(buf.ptr);
             const owning_heap = segment.heap;
 
@@ -203,18 +253,19 @@ pub fn Allocator(comptime config: Config) type {
                 return;
             };
 
+            const backing_size = owning_heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
+
             if (config.memory_limit) |_| {
-                const size = owning_heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
-                self.stats.total_allocated_memory -= size;
-            } else {
-                _ = owning_heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
+                self.stats.total_memory_allocated -= backing_size;
             }
 
             if (config.track_allocations) {
                 const heap_data = self.thread_heaps.uncheckedAt(heap_index);
+
                 heap_data.metadata.mutex.lock();
+                defer heap_data.metadata.mutex.unlock();
+
                 assert(heap_data.metadata.map.remove(@intFromPtr(buf.ptr)));
-                heap_data.metadata.mutex.unlock();
             }
 
             return;
@@ -227,6 +278,7 @@ const assert = std.debug.assert;
 
 const builtin = @import("builtin");
 
+const constants = @import("constants.zig");
 const log = @import("log.zig");
 
 const Heap = @import("Heap.zig");
