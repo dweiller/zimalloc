@@ -43,33 +43,33 @@ pub const Alloc = struct {
     backing_size: usize,
 };
 
-pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
+pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
     assert(self.thread_id == std.Thread.getCurrentId());
-    if (len > constants.max_slot_size_large_page) {
-        log.debug("allocate: huge allocation len={d}", .{len});
-        assert(@as(u32, 1) << @intCast(ShiftIntU32, log2_align) <= std.mem.page_size);
 
-        self.huge_allocations.lock();
-        defer self.huge_allocations.unlock();
+    log.debug("allocate: huge allocation len={d}, log2_align={d}", .{ len, log2_align });
+    assert(@as(usize, 1) << @intCast(std.math.Log2Int(usize), log2_align) <= std.mem.page_size);
 
-        self.huge_allocations.ensureUnusedCapacityRaw(1) catch {
-            log.debug("could not expand huge alloc table", .{});
-            return null;
-        };
-        const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
-        self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr);
-        return .{
-            .ptr = ptr,
-            .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
-        };
-    }
+    self.huge_allocations.lock();
+    defer self.huge_allocations.unlock();
 
-    const aligned_size = slotSizeAligned(@intCast(u32, len), log2_align);
-    const class = sizeClass(aligned_size);
+    self.huge_allocations.ensureUnusedCapacityRaw(1) catch {
+        log.debug("could not expand huge alloc table", .{});
+        return null;
+    };
+    const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
+    self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr);
+    return .{
+        .ptr = ptr,
+        .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
+    };
+}
+
+pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
+    assert(class < size_class_count);
 
     log.debugVerbose(
-        "allocate: len={d}, log2_align={d}, size_class={d}",
-        .{ len, log2_align, class },
+        "allocate: size class={d}, log2_align={d}",
+        .{ class, log2_align },
     );
 
     const page_list = &self.pages[class];
@@ -127,7 +127,7 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
         }
 
         log.debugVerbose("no suitable pre-existing page found", .{});
-        const new_page = self.initPage(aligned_size) catch return null;
+        const new_page = self.initPage(class) catch return null;
         break :slot new_page.data.allocSlotFast().?;
     };
     const aligned_address = std.mem.alignForwardLog2(@intFromPtr(slot.ptr), log2_align);
@@ -135,6 +135,31 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
         .ptr = @ptrFromInt([*]u8, aligned_address),
         .backing_size = slot.len,
     };
+}
+
+pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
+    assert(self.thread_id == std.Thread.getCurrentId());
+    log.debugVerbose(
+        "allocate: len={d}, log2_align={d}",
+        .{ len, log2_align },
+    );
+    if (len > constants.max_slot_size_large_page) {
+        return self.allocateHuge(len, log2_align, ret_addr);
+    }
+
+    const next_size = indexToSize(sizeClass(len));
+    const next_size_log2_align = @ctz(next_size);
+
+    const slot_size_min = if (log2_align <= next_size_log2_align)
+        len
+    else blk: {
+        const alignment = @as(usize, 1) << @intCast(std.math.Log2Int(usize), log2_align);
+        break :blk len + alignment - 1;
+    };
+
+    const class = sizeClass(slot_size_min);
+
+    return self.allocateSizeClass(class, log2_align);
 }
 
 pub fn resizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
@@ -208,8 +233,6 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize
     return self.deallocateInSegment(buf, log2_align, ret_addr, segment);
 }
 
-const ShiftIntU32 = std.math.Log2Int(u32);
-
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
     return if (self.allocate(len, log2_align, ret_addr)) |a| a.ptr else null;
@@ -226,8 +249,8 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
 }
 
 /// asserts that `slot_size <= max_slot_size_large_page`
-fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
-    const slot_size = indexToSize(sizeClass(size));
+fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
+    const slot_size = indexToSize(class);
 
     assert(slot_size <= constants.max_slot_size_large_page);
 
@@ -269,7 +292,7 @@ fn initPage(self: *Heap, size: u32) error{OutOfMemory}!*Page.List.Node {
     );
     page.init(slot_size, segment.pageSlice(index));
     segment.init_set.set(index);
-    const class = sizeClass(slot_size);
+
     if (isNullPageNode(self.pages[class].head.?)) {
         // capcity == 0 means it's the null page
         unlikely();
@@ -302,17 +325,6 @@ fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
     if (segment.prev) |prev| prev.next = segment.next;
     if (segment.next) |next| next.prev = segment.prev;
     segment.deinit();
-}
-
-fn slotSizeAligned(len: u32, log2_align: u8) u32 {
-    const next_size = indexToSize(sizeClass(len));
-    const next_size_log2_align = @ctz(next_size);
-    if (log2_align <= next_size_log2_align)
-        return @intCast(u32, len)
-    else {
-        const alignment = @as(u32, 1) << @intCast(ShiftIntU32, log2_align);
-        return len + alignment - 1;
-    }
 }
 
 // this is used to represent an uninitialised page list so we can avoid
