@@ -15,7 +15,7 @@ var metadata = std.AutoHashMap(usize, AllocData){
 
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});
-    return allocateBytes(len, false);
+    return allocateBytes(len, 0, false);
 }
 
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
@@ -49,7 +49,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         log.debug("reallocated pointer: {*}", .{new_mem});
         return new_mem;
     }
-    return allocateBytes(len, false);
+    return allocateBytes(len, 0, false);
 }
 
 export fn free(ptr_opt: ?*anyopaque) void {
@@ -71,13 +71,49 @@ export fn free(ptr_opt: ?*anyopaque) void {
 export fn calloc(size: usize, count: usize) ?*anyopaque {
     log.debug("calloc {d} {d}", .{ size, count });
     const bytes = size * count;
-    return allocateBytes(bytes, true);
+    return allocateBytes(bytes, 0, true);
 }
 
-fn allocateBytes(byte_count: usize, comptime zero: bool) ?*anyopaque {
+export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
+    log.debug("aligned_alloc alignment={d}, size={d}", .{ alignment, size });
+    return allocateBytes(size, std.math.log2_int(usize, alignment), false);
+}
+
+export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int {
+    log.debug("posix_memalign ptr={*}, alignment={d}, size={d}", .{ ptr, alignment, size });
+
+    if (@popCount(alignment) != 1 or alignment < @sizeOf(*anyopaque)) {
+        return @intFromEnum(std.os.E.INVAL);
+    }
+
+    if (allocateBytes(size, std.math.log2_int(usize, alignment), false)) |p| {
+        ptr.* = p;
+        return 0;
+    }
+
+    return @intFromEnum(std.os.E.NOMEM);
+}
+
+export fn memalign(alignment: usize, size: usize) ?*anyopaque {
+    log.debug("memalign alignment={d}, size={d}", .{ alignment, size });
+    return allocateBytes(size, std.math.log2_int(usize, alignment), false);
+}
+
+export fn valloc(size: usize) ?*anyopaque {
+    log.debug("valloc {d}", .{size});
+    return allocateBytes(size, std.math.log2_int(usize, std.mem.page_size), false);
+}
+
+export fn pvalloc(size: usize) ?*anyopaque {
+    log.debug("pvalloc {d}", .{size});
+    const aligned_size = std.mem.alignForward(usize, size, std.mem.page_size);
+    return allocateBytes(aligned_size, std.math.log2_int(usize, std.mem.page_size), false);
+}
+
+fn allocateBytes(byte_count: usize, log2_align: u6, comptime zero: bool) ?*anyopaque {
     if (byte_count == 0) return null;
 
-    if (allocator.rawAlloc(byte_count, 0, @returnAddress())) |ptr| {
+    if (allocator.rawAlloc(byte_count, log2_align, @returnAddress())) |ptr| {
         const min_alignment = constants.min_slot_size_usize_count * @sizeOf(usize);
         const casted_ptr = @alignCast(min_alignment, ptr);
         @memset(casted_ptr[0..byte_count], if (zero) 0 else undefined);
