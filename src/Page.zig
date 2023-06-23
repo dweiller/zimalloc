@@ -14,7 +14,12 @@ pub const List = list.Circular(Page);
 pub const FreeList = list.Appendable(void);
 
 comptime {
-    assert(@sizeOf(FreeList.Node) <= constants.min_slot_size_usize_count * @sizeOf(usize));
+    if (@sizeOf(FreeList.Node) > constants.min_slot_size_usize_count * @sizeOf(usize)) {
+        @compileError("FreeList.Node must fit inside the minimum slot size");
+    }
+    if (@alignOf(FreeList.Node) > constants.min_slot_size_usize_count * @sizeOf(usize)) {
+        @compileError("FreeList.Node must have alignment no greater than the minimum slot size");
+    }
 }
 
 pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) void {
@@ -48,7 +53,7 @@ pub fn deinit(self: *Page) !void {
         self.other_free_list.first.?;
 
     const page_index = segment.pageIndex(ptr_in_page);
-    assert(&segment.pages[page_index].data == self);
+    assert.withMessage(&segment.pages[page_index].data == self, "Page.deinit: freelists are corrupt");
 
     log.debug("deiniting page {d} in segment {*}", .{ page_index, segment });
     segment.init_set.unset(page_index);
@@ -72,7 +77,10 @@ pub fn migrateFreeList(self: *Page) void {
         self.other_free_list.last,
     });
 
-    assert(self.alloc_free_list.first == null);
+    assert.withMessage(
+        self.alloc_free_list.first == null,
+        "migrating free lists when alloc_free_list is not empty",
+    );
 
     var other_free_list_head = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
 
@@ -125,13 +133,12 @@ pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyo
     const index = (bytes_address - page_address) / self.slot_size;
     const slot_address = page_address + index * self.slot_size;
     const slot = @ptrFromInt([*]align(8) u8, slot_address)[0..self.slot_size];
-    assert(slot_address <= bytes_address);
     return slot;
 }
 
 pub fn freeLocalAligned(self: *Page, slot: Slot) void {
-    assert(self.containingSlot(slot.ptr).ptr == slot.ptr);
-    assert(self.used_count > 0);
+    assert.withMessage(self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free local slot not in the page");
+    assert.withMessage(self.used_count > 0, "tried to free local slot while used_count is 0");
 
     const node_ptr = @ptrCast(*FreeList.Node, slot);
     self.local_free_list.prepend(node_ptr);
@@ -139,7 +146,8 @@ pub fn freeLocalAligned(self: *Page, slot: Slot) void {
 }
 
 pub fn freeOtherAligned(self: *Page, slot: Slot) void {
-    assert(self.containingSlot(slot.ptr).ptr == slot.ptr);
+    assert.withMessage(self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free foreign slot not in the page");
+    assert.withMessage(self.used_count > 0, "tried to free foreign slot while used_count is 0");
 
     const node = @ptrCast(*FreeList.Node, slot);
     node.next = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
@@ -158,10 +166,10 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
 }
 
 const std = @import("std");
-const assert = std.debug.assert;
 
-const log = @import("log.zig");
+const assert = @import("assert.zig");
 const constants = @import("constants.zig");
 const list = @import("list.zig");
+const log = @import("log.zig");
 
 const Segment = @import("Segment.zig");

@@ -133,12 +133,12 @@ fn invalid(comptime fmt: []const u8, args: anytype) void {
 }
 
 const std = @import("std");
-const assert = std.debug.assert;
 
 const zimalloc = @import("zimalloc.zig");
-const constants = @import("constants.zig");
 
+const assert = @import("assert.zig");
 const log = @import("log.zig");
+const constants = @import("constants.zig");
 
 const build_options = @import("build_options");
 

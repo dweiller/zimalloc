@@ -23,7 +23,7 @@ pub const branchless = struct {
     /// asserts `len > 0`
     pub fn ofSizeNoSaturatingSub(len: usize) usize {
         // this version doesn't need saturating subtraction
-        assert(len > 0);
+        assert.withMessage(len > 0, "ofSize: len is 0");
         const usize_count = usizeCount(len);
         const b = leading_bit_index(usize_count);
         const extra_bits = (usize_count - 1) >> (@max(b, log2_divisions) - log2_divisions);
@@ -35,7 +35,7 @@ pub const branchless = struct {
 
     /// asserts `len > 0`
     pub fn ofSize(len: usize) usize {
-        assert(len > 0);
+        assert.withMessage(len > 0, "ofSize: len is 0");
         const usize_count = usizeCount(len);
         const b = leading_bit_index(usize_count);
         const extra_bits = (usize_count - 1) >> (@max(b, log2_divisions) - log2_divisions);
@@ -135,7 +135,7 @@ pub const branching = struct {
     }
 
     pub fn ofSize(len: usize) usize {
-        assert(len > 0);
+        assert.withMessage(len > 0, "len is 0");
         const usize_count = usizeCount(len);
         if (usize_count < 2 << log2_divisions) {
             return usize_count - 1;
@@ -202,7 +202,8 @@ inline fn leading_bit_index(a: usize) ShiftInt {
 }
 
 const std = @import("std");
-const assert = std.debug.assert;
+
+const assert = @import("assert.zig");
 
 const constants = @import("constants.zig");
 

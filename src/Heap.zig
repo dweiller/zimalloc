@@ -44,10 +44,13 @@ pub const Alloc = struct {
 };
 
 pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
-    assert(self.thread_id == std.Thread.getCurrentId());
+    assert.withMessage(self.thread_id == std.Thread.getCurrentId(), "tried to allocate from wrong thread");
 
     log.debug("allocate: huge allocation len={d}, log2_align={d}", .{ len, log2_align });
-    assert(@as(usize, 1) << @intCast(std.math.Log2Int(usize), log2_align) <= std.mem.page_size);
+    assert.withMessage(
+        @as(usize, 1) << @intCast(std.math.Log2Int(usize), log2_align) <= std.mem.page_size,
+        "requested alignment is greater than the system page size",
+    );
 
     self.huge_allocations.lock();
     defer self.huge_allocations.unlock();
@@ -65,7 +68,7 @@ pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?A
 }
 
 pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
-    assert(class < size_class_count);
+    assert.withMessage(class < size_class_count, "requested size class is too big");
 
     log.debugVerbose(
         "allocate: size class={d}, log2_align={d}",
@@ -139,7 +142,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
 }
 
 pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
-    assert(self.thread_id == std.Thread.getCurrentId());
+    assert.withMessage(self.thread_id == std.Thread.getCurrentId(), "tried to allocate from wrond thread");
     log.debugVerbose(
         "allocate: len={d}, log2_align={d}",
         .{ len, log2_align },
@@ -175,7 +178,7 @@ pub fn resizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret
 
     const segment = Segment.ofPtr(buf.ptr);
     const page_index = segment.pageIndex(buf.ptr);
-    assert(segment.init_set.isSet(page_index));
+    assert.withMessage(segment.init_set.isSet(page_index), "segment init_set corrupt with resizing");
     const page_node = &(segment.pages[page_index]);
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, buf.ptr);
@@ -219,7 +222,7 @@ pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) u
     log.debug("deallocate huge allocation {*}", .{buf.ptr});
     std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
 
-    assert(self.huge_allocations.removeRaw(buf.ptr));
+    assert.withMessage(self.huge_allocations.removeRaw(buf.ptr), "huge allocation table corrupt with deallocating");
     return std.mem.alignForward(usize, buf.len, std.mem.page_size);
 }
 
@@ -253,7 +256,7 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
 fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
     const slot_size = indexToSize(class);
 
-    assert(slot_size <= constants.max_slot_size_large_page);
+    assert.withMessage(slot_size <= constants.max_slot_size_large_page, "slot size of requested class too large");
 
     const segment: Segment.Ptr = segment: {
         var segment_iter = self.segments;
@@ -268,7 +271,7 @@ fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
             const segment = Segment.init(self, page_size) orelse
                 return error.OutOfMemory;
             if (self.segments) |orig_head| {
-                assert(orig_head.prev == null);
+                assert.withMessage(orig_head.prev == null, "initPage: segment list head is currupt");
                 orig_head.prev = segment;
             }
             log.debug("initialised new segment: {*}", .{segment});
@@ -281,7 +284,7 @@ fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
         var iter = segment.init_set.iterator(.{ .kind = .unset });
         break :index iter.next().?; // segment is guaranteed to have an uninitialised page
     };
-    assert(index < segment.page_count);
+    assert.withMessage(index < segment.page_count, "initPage: segment init_set is corrupt");
 
     var page_node = &segment.pages[index];
     page_node.next = page_node;
@@ -308,7 +311,7 @@ fn deinitPage(
     page_node: *Page.List.Node,
     page_list: *Page.List,
 ) !void {
-    assert(page_list.head != null);
+    assert.withMessage(page_list.head != null, "deinitPage: page list is empty");
 
     page_list.remove(page_node);
 
@@ -317,7 +320,7 @@ fn deinitPage(
 }
 
 fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
-    assert(self.segments != null);
+    assert.withMessage(self.segments != null, "releaseSegment: heap owns no segments");
 
     log.debug("releasing segment {*}", .{segment});
     if (self.segments.? == segment) {
@@ -357,10 +360,9 @@ fn unlikely() void {
 const size_class_count = size_class.count;
 
 const std = @import("std");
-const assert = std.debug.assert;
 
+const assert = @import("assert.zig");
 const log = @import("log.zig");
-
 const constants = @import("constants.zig");
 
 const size_class = @import("size_class.zig");
