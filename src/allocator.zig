@@ -4,6 +4,7 @@ pub const Config = struct {
     thread_data_prealloc: usize = 128,
     thread_safe: bool = !builtin.single_threaded,
     track_allocations: bool = false, // TODO: use this to assert usage/invariants
+    safety_checks: bool = true,
 };
 
 pub fn Allocator(comptime config: Config) type {
@@ -39,6 +40,7 @@ pub fn Allocator(comptime config: Config) type {
         const ThreadHeapData = struct {
             heap: Heap,
             metadata: Metadata = if (config.track_allocations) .{} else {},
+            owner: *Self,
         };
 
         pub fn init(backing_allocator: std.mem.Allocator, thread_count: usize) error{OutOfMemory}!Self {
@@ -67,19 +69,20 @@ pub fn Allocator(comptime config: Config) type {
 
             new_ptr.* = .{
                 .heap = Heap.init(),
+                .owner = self,
             };
 
             log.debug("heap initialised: {*}", .{new_ptr});
             return new_ptr;
         }
 
-        fn heapIndex(self: *const Self, heap: *const Heap) ?usize {
+        fn ownsHeap(self: *const Self, heap: *const Heap) bool {
             var index: usize = 0;
             var iter = self.thread_heaps.constIterator(0);
             while (iter.next()) |heap_data| : (index += 1) {
-                if (&heap_data.heap == heap) return index;
+                if (&heap_data.heap == heap) return true;
             }
-            return null;
+            return false;
         }
 
         pub usingnamespace if (config.track_allocations) struct {
@@ -104,12 +107,17 @@ pub fn Allocator(comptime config: Config) type {
                 const segment = Segment.ofPtr(ptr);
                 const owning_heap = segment.heap;
 
-                const heap_index = self.heapIndex(owning_heap) orelse return error.BadHeap;
-
-                const metadata = &self.thread_heaps.uncheckedAt(heap_index).metadata;
+                if (config.safety_checks) if (!self.ownsHeap(owning_heap)) return error.BadHeap;
+                const metadata = self.heapMetadataUnsafe(owning_heap);
                 metadata.mutex.lock();
                 defer metadata.mutex.unlock();
                 return metadata.map.get(@intFromPtr(ptr));
+            }
+
+            fn heapMetadataUnsafe(self: *Self, heap: *Heap) *Metadata {
+                const thread_heap_data = @fieldParentPtr(ThreadHeapData, "heap", heap);
+                assert(self == thread_heap_data.owner);
+                return &thread_heap_data.metadata;
             }
         } else struct {};
 
@@ -205,7 +213,10 @@ pub fn Allocator(comptime config: Config) type {
             const segment = Segment.ofPtr(buf.ptr);
             const owning_heap = segment.heap;
 
-            if (self.heapIndex(owning_heap) == null) std.debug.panic("invalid resize: {*}", .{buf});
+            if (config.safety_checks) if (!self.ownsHeap(owning_heap)) {
+                log.err("invalid resize: {*} is not part of an owned heap", .{buf});
+                return false;
+            };
 
             const can_resize = owning_heap.resizeInPlace(buf, log2_align, new_len, ret_addr);
 
@@ -248,8 +259,8 @@ pub fn Allocator(comptime config: Config) type {
             const segment = Segment.ofPtr(buf.ptr);
             const owning_heap = segment.heap;
 
-            const heap_index = self.heapIndex(owning_heap) orelse {
-                log.warn("invalid free: {*}", .{buf.ptr});
+            if (config.safety_checks) if (!self.ownsHeap(owning_heap)) {
+                log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
                 return;
             };
 
@@ -260,12 +271,12 @@ pub fn Allocator(comptime config: Config) type {
             }
 
             if (config.track_allocations) {
-                const heap_data = self.thread_heaps.uncheckedAt(heap_index);
+                const metadata = self.heapMetadataUnsafe(owning_heap);
 
-                heap_data.metadata.mutex.lock();
-                defer heap_data.metadata.mutex.unlock();
+                metadata.mutex.lock();
+                defer metadata.mutex.unlock();
 
-                assert(heap_data.metadata.map.remove(@intFromPtr(buf.ptr)));
+                assert(metadata.map.remove(@intFromPtr(buf.ptr)));
             }
 
             return;
