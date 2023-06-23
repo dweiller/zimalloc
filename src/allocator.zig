@@ -175,6 +175,9 @@ pub fn Allocator(comptime config: Config) type {
                     return null;
                 };
             }
+            defer if (config.track_allocations) {
+                metadata.mutex.unlock();
+            };
 
             const allocation = heap.allocate(len, log2_align, ret_addr) orelse return null;
 
@@ -197,7 +200,6 @@ pub fn Allocator(comptime config: Config) type {
                         .is_huge = len > constants.max_slot_size_large_page,
                     },
                 );
-                metadata.mutex.unlock();
             }
 
             return allocation.ptr;
