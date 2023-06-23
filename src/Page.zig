@@ -8,7 +8,7 @@ slot_size: u32,
 
 const Page = @This();
 
-const SlotCountInt = std.math.IntFittingRange(0, constants.small_page_size / @sizeOf(usize));
+pub const SlotCountInt = std.math.IntFittingRange(0, constants.small_page_size / @sizeOf(usize));
 
 pub const List = list.Circular(Page);
 pub const FreeList = list.Appendable(void);
