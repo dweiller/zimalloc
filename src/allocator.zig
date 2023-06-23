@@ -97,7 +97,9 @@ pub fn Allocator(comptime config: Config) type {
                             const metadata = &heap_data.metadata;
                             metadata.mutex.lock();
                             defer metadata.mutex.unlock();
-                            const data = metadata.map.get(@intFromPtr(ptr)) orelse return null;
+                            const data = metadata.map.get(@intFromPtr(ptr)) orelse {
+                                @panic("large allocation metadata is missing");
+                            };
                             assert(data.is_huge);
                             return data;
                         }
