@@ -228,7 +228,7 @@ pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) u
 pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
     if (self.huge_allocations.contains(@intFromPtr(buf.ptr))) {
         self.deallocateHuge(buf, log2_align, ret_addr);
-        assert(self.huge_allocations.removeRaw(@intFromPtr(buf.ptr)));
+        return;
     }
     const segment = Segment.ofPtr(buf.ptr);
     return self.deallocateInSegment(buf, log2_align, ret_addr, segment);
