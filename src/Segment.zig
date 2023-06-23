@@ -16,7 +16,7 @@ pub const PageSize = union(enum) {
 
 /// asserts that `slot_size <= max_slot_size_large_page`
 pub fn pageSize(slot_size: u32) PageSize {
-    assert(slot_size <= max_slot_size_large_page);
+    assert.withMessage(slot_size <= max_slot_size_large_page, "slot size greater than maximum");
     if (slot_size <= max_slot_size_small_page)
         return .small
     else if (slot_size <= max_slot_size_large_page)
@@ -65,7 +65,7 @@ pub fn deinit(self: Ptr) void {
 }
 
 pub fn pageIndex(self: ConstPtr, ptr: *anyopaque) usize {
-    assert(@intFromPtr(self) < @intFromPtr(ptr));
+    assert.withMessage(@intFromPtr(self) < @intFromPtr(ptr), "pageIndex: pointer address is lower than the page address");
     return (@intFromPtr(ptr) - @intFromPtr(self)) >> self.page_shift;
 }
 
@@ -76,7 +76,7 @@ pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
         const page_size = (@as(usize, 1) << self.page_shift) - segment_first_page_offset;
         return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..page_size];
     } else {
-        assert(self.page_shift == small_page_shift);
+        assert.withMessage(self.page_shift == small_page_shift, "pageSlice: corrupt page_shift or index");
         const address = @intFromPtr(self) + index * small_page_size;
         return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..small_page_size];
     }
@@ -108,7 +108,8 @@ fn deallocateSegment(self: Ptr) void {
 const PageBitSet = std.StaticBitSet(small_page_count);
 
 const std = @import("std");
-const assert = std.debug.assert;
+
+const assert = @import("assert.zig");
 
 const Heap = @import("Heap.zig");
 const Page = @import("Page.zig");
