@@ -105,7 +105,8 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
             var prev = page_node;
             while (node != page_node) {
                 node.data.migrateFreeList();
-                const in_use_count = node.data.used_count - node.data.other_freed;
+                const other_freed = @atomicLoad(Page.SlotCountInt, &node.data.other_freed, .Unordered);
+                const in_use_count = node.data.used_count - other_freed;
                 if (in_use_count == 0) {
                     deinitPage(node, page_list) catch |err|
                         log.warn("could not madvise page: {s}", .{@errorName(err)});
@@ -114,11 +115,11 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
                     if (segment.init_set.count() == 0) {
                         self.releaseSegment(segment);
                     }
-                } else if (node.data.used_count < node.data.capacity) {
+                } else if (node.data.allocSlotFast()) |slot| {
                     log.debugVerbose("found suitable page: {?*}", .{node.data.local_free_list.first});
                     // rotate page list
                     page_list.head = node;
-                    break :slot node.data.allocSlotFast().?;
+                    break :slot slot;
                 } else {
                     prev = node;
                     node = node.next;
