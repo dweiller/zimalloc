@@ -273,12 +273,6 @@ pub fn Allocator(comptime config: Config) type {
                 return;
             };
 
-            const backing_size = owning_heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
-
-            if (config.memory_limit) |_| {
-                self.stats.total_memory_allocated -= backing_size;
-            }
-
             if (config.track_allocations) {
                 const metadata = self.heapMetadataUnsafe(owning_heap);
 
@@ -286,6 +280,13 @@ pub fn Allocator(comptime config: Config) type {
                 defer metadata.mutex.unlock();
 
                 assert.withMessage(metadata.map.remove(@intFromPtr(buf.ptr)), "free: allocation metadata is missing");
+            }
+
+            const backing_size = owning_heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
+
+            if (config.memory_limit) |_| {
+                // this might race with concurrernt alloc
+                self.stats.total_memory_allocated -= backing_size;
             }
 
             return;
