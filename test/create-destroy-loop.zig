@@ -45,4 +45,3 @@ fn waitForInput() void {
     var buf: [64]u8 = undefined;
     _ = stdin.readUntilDelimiter(&buf, '\n') catch return;
 }
-
