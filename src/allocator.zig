@@ -86,7 +86,11 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         pub usingnamespace if (config.track_allocations) struct {
-            pub fn getMetadata(self: *Self, ptr: *anyopaque) !?AllocData {
+            pub fn getThreadData(
+                self: *Self,
+                ptr: *anyopaque,
+                comptime hold_lock: bool,
+            ) !*ThreadHeapData {
                 // TODO: check this is valid on windows
                 // this check also covers buf.len > constants.max_slot_size_large_page
 
@@ -95,25 +99,29 @@ pub fn Allocator(comptime config: Config) type {
                     while (heap_iter.next()) |heap_data| {
                         if (heap_data.heap.huge_allocations.contains(ptr)) {
                             const metadata = &heap_data.metadata;
+
                             metadata.mutex.lock();
-                            defer metadata.mutex.unlock();
+                            defer if (!hold_lock) metadata.mutex.unlock();
+
                             const data = metadata.map.get(@intFromPtr(ptr)) orelse {
                                 @panic("large allocation metadata is missing");
                             };
                             assert.withMessage(data.is_huge, "metadata flag is_huge is not set");
-                            return data;
+                            return heap_data;
                         }
                     }
                 }
 
                 const segment = Segment.ofPtr(ptr);
                 const owning_heap = segment.heap;
+                const heap_data = @fieldParentPtr(ThreadHeapData, "heap", owning_heap);
+                assert.withMessage(&heap_data.heap == owning_heap, "getMetadata: heap metadata corrupt");
 
                 if (config.safety_checks) if (!self.ownsHeap(owning_heap)) return error.BadHeap;
-                const metadata = self.heapMetadataUnsafe(owning_heap);
-                metadata.mutex.lock();
-                defer metadata.mutex.unlock();
-                return metadata.map.get(@intFromPtr(ptr));
+
+                if (hold_lock) heap_data.metadata.mutex.lock();
+
+                return heap_data;
             }
 
             fn heapMetadataUnsafe(self: *Self, heap: *Heap) *Metadata {
@@ -205,6 +213,47 @@ pub fn Allocator(comptime config: Config) type {
             return allocation.ptr;
         }
 
+        /// if tracking allocations, caller must hold metadata lock of heap owning `buf`
+        pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
+            const segment = Segment.ofPtr(buf.ptr);
+
+            if (config.safety_checks) if (!self.ownsHeap(heap)) {
+                log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
+                return;
+            };
+
+            if (config.track_allocations) {
+                const metadata = self.heapMetadataUnsafe(heap);
+                assert.withMessage(metadata.map.remove(@intFromPtr(buf.ptr)), "free: allocation metadata is missing");
+            }
+
+            const backing_size = heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
+
+            if (config.memory_limit) |_| {
+                // this might race with concurrernt alloc
+                self.stats.total_memory_allocated -= backing_size;
+            }
+        }
+
+        /// if tracking allocations, caller must hold metadata lock of heap owning `buf`
+        pub fn freeHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
+            if (config.safety_checks) if (!self.ownsHeap(heap)) {
+                log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
+                return;
+            };
+
+            const size = heap.deallocateHuge(buf, log2_align, ret_addr);
+
+            if (config.memory_limit) |_| {
+                self.stats.total_allocated_memory -= size;
+            }
+
+            if (config.track_allocations) {
+                const metadata = self.heapMetadataUnsafe(heap);
+                assert.withMessage(metadata.map.remove(@intFromPtr(buf.ptr)), "free: huge allocation metadata is missing");
+            }
+        }
+
         fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
             assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "resize: ctx is not aligned");
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
@@ -248,17 +297,14 @@ pub fn Allocator(comptime config: Config) type {
                     defer heap_data.heap.huge_allocations.unlock();
 
                     if (heap_data.heap.huge_allocations.containsRaw(buf.ptr)) {
-                        const size = heap_data.heap.deallocateHuge(buf, log2_align, ret_addr);
-
-                        if (config.memory_limit) |_| {
-                            self.stats.total_allocated_memory -= size;
-                        }
-
                         if (config.track_allocations) {
                             heap_data.metadata.mutex.lock();
                             defer heap_data.metadata.mutex.unlock();
-                            assert.withMessage(heap_data.metadata.map.remove(@intFromPtr(buf.ptr)), "free: huge allocation metadata is missing");
+                            self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
+                            return;
                         }
+
+                        self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
                         return;
                     }
                 }
@@ -266,30 +312,18 @@ pub fn Allocator(comptime config: Config) type {
             assert.withMessage(buf.len <= constants.max_slot_size_large_page, "free: tried to free unowned pointer");
 
             const segment = Segment.ofPtr(buf.ptr);
-            const owning_heap = segment.heap;
-
-            if (config.safety_checks) if (!self.ownsHeap(owning_heap)) {
-                log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
-                return;
-            };
+            const heap = segment.heap;
 
             if (config.track_allocations) {
-                const metadata = self.heapMetadataUnsafe(owning_heap);
+                const metadata = self.heapMetadataUnsafe(heap);
 
                 metadata.mutex.lock();
                 defer metadata.mutex.unlock();
-
-                assert.withMessage(metadata.map.remove(@intFromPtr(buf.ptr)), "free: allocation metadata is missing");
+                self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
+                return;
             }
 
-            const backing_size = owning_heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
-
-            if (config.memory_limit) |_| {
-                // this might race with concurrernt alloc
-                self.stats.total_memory_allocated -= backing_size;
-            }
-
-            return;
+            self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
         }
     };
 }
