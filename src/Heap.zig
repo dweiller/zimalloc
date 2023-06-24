@@ -183,7 +183,7 @@ const ShiftIntU32 = std.math.Log2Int(u32);
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
-    return if (self.allocator(len, log2_align, ret_addr)) |a| a.ptr else null;
+    return if (self.allocate(len, log2_align, ret_addr)) |a| a.ptr else null;
 }
 
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
