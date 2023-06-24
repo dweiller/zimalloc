@@ -21,11 +21,14 @@ export fn malloc(len: usize) ?*anyopaque {
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
     log.debug("realloc {?*} {d}", .{ ptr_opt, len });
     if (ptr_opt) |ptr| {
-        const alloc = allocator_instance.getMetadata(ptr) catch {
+        const heap_data = allocator_instance.getThreadData(ptr, false) catch {
             invalid("invalid realloc: {*} - no valid heap", .{ptr});
             return null;
-        } orelse {
-            invalid("invalid realloc: {*}", .{ptr});
+        };
+        // defer heap_data.metadata.mutex.unlock();
+
+        const alloc = heap_data.metadata.map.get(@intFromPtr(ptr)) orelse {
+            invalid("invalid resize: {*}", .{ptr});
             return null;
         };
 
@@ -55,16 +58,28 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
 export fn free(ptr_opt: ?*anyopaque) void {
     log.debug("free {?*}", .{ptr_opt});
     if (ptr_opt) |ptr| {
-        const alloc = allocator_instance.getMetadata(ptr) catch {
+        const heap_data = allocator_instance.getThreadData(ptr, true) catch {
             invalid("invalid free: {*} - no valid heap", .{ptr});
             return;
-        } orelse {
+        };
+        defer heap_data.metadata.mutex.unlock();
+
+        const alloc = heap_data.metadata.map.get(@intFromPtr(ptr)) orelse {
             invalid("invalid free: {*}", .{ptr});
             return;
         };
 
         const slice = @ptrCast([*]u8, ptr)[0..alloc.size];
-        allocator.free(slice);
+        if (slice.len == 0) return;
+
+        @memset(slice, undefined);
+
+        if (alloc.is_huge) {
+            allocator_instance.freeHugeFromHeap(&heap_data.heap, slice, 0, @returnAddress());
+            return;
+        }
+
+        allocator_instance.freeNonHugeFromHeap(&heap_data.heap, slice, 0, @returnAddress());
     }
 }
 
