@@ -16,7 +16,7 @@ pub const PageSize = union(enum) {
 
 /// asserts that `slot_size <= max_slot_size_large_page`
 pub fn pageSize(slot_size: u32) PageSize {
-    assert.withMessage(slot_size <= max_slot_size_large_page, "slot size greater than maximum");
+    assert.withMessage(@src(), slot_size <= max_slot_size_large_page, "slot size greater than maximum");
     if (slot_size <= max_slot_size_small_page)
         return .small
     else if (slot_size <= max_slot_size_large_page)
@@ -65,7 +65,7 @@ pub fn deinit(self: Ptr) void {
 }
 
 pub fn pageIndex(self: ConstPtr, ptr: *anyopaque) usize {
-    assert.withMessage(@intFromPtr(self) < @intFromPtr(ptr), "pageIndex: pointer address is lower than the page address");
+    assert.withMessage(@src(), @intFromPtr(self) < @intFromPtr(ptr), "pointer address is lower than the page address");
     return (@intFromPtr(ptr) - @intFromPtr(self)) >> self.page_shift;
 }
 
@@ -76,7 +76,7 @@ pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
         const page_size = (@as(usize, 1) << self.page_shift) - segment_first_page_offset;
         return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..page_size];
     } else {
-        assert.withMessage(self.page_shift == small_page_shift, "pageSlice: corrupt page_shift or index");
+        assert.withMessage(@src(), self.page_shift == small_page_shift, "corrupt page_shift or index");
         const address = @intFromPtr(self) + index * small_page_size;
         return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..small_page_size];
     }
