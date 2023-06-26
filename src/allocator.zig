@@ -142,10 +142,13 @@ pub fn Allocator(comptime config: Config) type {
             };
         }
 
-        fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
-            assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "alloc: ctx is not aligned");
-            const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
-
+        pub fn allocate(
+            self: *Self,
+            len: usize,
+            log2_align: u8,
+            ret_addr: usize,
+            comptime lock_held: bool,
+        ) ?[*]u8 {
             if (config.memory_limit) |limit| {
                 assert.withMessage(self.stats.total_allocated_memory <= limit, "alloc: corrupt stats");
                 if (len + limit > self.stats.total_allocated_memory) {
@@ -159,15 +162,22 @@ pub fn Allocator(comptime config: Config) type {
             var iter = self.thread_heaps.iterator(0);
             while (iter.next()) |heap_data| {
                 if (heap_data.heap.thread_id == thread_id) {
-                    return self.allocInHeap(heap_data, len, log2_align, ret_addr);
+                    return self.allocInHeap(heap_data, len, log2_align, ret_addr, lock_held);
                 }
             } else {
                 const heap_data = self.initHeapForThread() orelse return null;
-                return self.allocInHeap(heap_data, len, log2_align, ret_addr);
+                return self.allocInHeap(heap_data, len, log2_align, ret_addr, lock_held);
             }
         }
 
-        inline fn allocInHeap(self: *Self, heap_data: *ThreadHeapData, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
+        inline fn allocInHeap(
+            self: *Self,
+            heap_data: *ThreadHeapData,
+            len: usize,
+            log2_align: u8,
+            ret_addr: usize,
+            comptime lock_held: bool,
+        ) ?[*]u8 {
             const heap = &heap_data.heap;
             const metadata = &heap_data.metadata;
 
@@ -177,13 +187,13 @@ pub fn Allocator(comptime config: Config) type {
             );
 
             if (config.track_allocations) {
-                metadata.mutex.lock();
+                if (!lock_held) metadata.mutex.lock();
                 metadata.map.ensureUnusedCapacity(self.backing_allocator, 1) catch {
                     log.debug("could not allocate metadata", .{});
                     return null;
                 };
             }
-            defer if (config.track_allocations) {
+            defer if (config.track_allocations) if (!lock_held) {
                 metadata.mutex.unlock();
             };
 
@@ -211,6 +221,51 @@ pub fn Allocator(comptime config: Config) type {
             }
 
             return allocation.ptr;
+        }
+
+        pub fn deallocate(
+            self: *Self,
+            buf: []u8,
+            log2_align: u8,
+            ret_addr: usize,
+            comptime lock_held: bool,
+        ) void {
+            // TODO: check this is valid on windows
+            // this check also covers buf.len > constants.max_slot_size_large_page
+            if (std.mem.isAligned(@intFromPtr(buf.ptr), std.mem.page_size)) {
+                var heap_iter = self.thread_heaps.iterator(0);
+                while (heap_iter.next()) |heap_data| {
+                    if (!lock_held) heap_data.heap.huge_allocations.lock();
+                    defer if (!lock_held) heap_data.heap.huge_allocations.unlock();
+
+                    if (heap_data.heap.huge_allocations.containsRaw(buf.ptr)) {
+                        if (config.track_allocations) {
+                            heap_data.metadata.mutex.lock();
+                            defer heap_data.metadata.mutex.unlock();
+                            self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
+                            return;
+                        }
+
+                        self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
+                        return;
+                    }
+                }
+            }
+            assert.withMessage(buf.len <= constants.max_slot_size_large_page, "free: tried to free unowned pointer");
+
+            const segment = Segment.ofPtr(buf.ptr);
+            const heap = segment.heap;
+
+            if (config.track_allocations) {
+                const metadata = self.heapMetadataUnsafe(heap);
+
+                if (!lock_held) metadata.mutex.lock();
+                defer if (!lock_held) metadata.mutex.unlock();
+                self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
+                return;
+            }
+
+            self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
         }
 
         /// if tracking allocations, caller must hold metadata lock of heap owning `buf`
@@ -254,6 +309,13 @@ pub fn Allocator(comptime config: Config) type {
             }
         }
 
+        fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
+            assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "alloc: ctx is not aligned");
+            const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
+
+            return self.allocate(len, log2_align, ret_addr, false);
+        }
+
         fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
             assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "resize: ctx is not aligned");
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
@@ -288,42 +350,7 @@ pub fn Allocator(comptime config: Config) type {
             assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "free: ctx is not aligned");
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
-            // TODO: check this is valid on windows
-            // this check also covers buf.len > constants.max_slot_size_large_page
-            if (std.mem.isAligned(@intFromPtr(buf.ptr), std.mem.page_size)) {
-                var heap_iter = self.thread_heaps.iterator(0);
-                while (heap_iter.next()) |heap_data| {
-                    heap_data.heap.huge_allocations.lock();
-                    defer heap_data.heap.huge_allocations.unlock();
-
-                    if (heap_data.heap.huge_allocations.containsRaw(buf.ptr)) {
-                        if (config.track_allocations) {
-                            heap_data.metadata.mutex.lock();
-                            defer heap_data.metadata.mutex.unlock();
-                            self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
-                            return;
-                        }
-
-                        self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
-                        return;
-                    }
-                }
-            }
-            assert.withMessage(buf.len <= constants.max_slot_size_large_page, "free: tried to free unowned pointer");
-
-            const segment = Segment.ofPtr(buf.ptr);
-            const heap = segment.heap;
-
-            if (config.track_allocations) {
-                const metadata = self.heapMetadataUnsafe(heap);
-
-                metadata.mutex.lock();
-                defer metadata.mutex.unlock();
-                self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
-                return;
-            }
-
-            self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
+            self.deallocate(buf, log2_align, ret_addr, false);
         }
     };
 }
