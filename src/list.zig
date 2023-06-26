@@ -26,7 +26,7 @@ pub fn Appendable(comptime T: type) type {
 
         /// asserts `self.first != null`
         pub fn appendList(self: *Self, other: Self) void {
-            assert.withMessage(self.first != null, "appendList: self.first is null");
+            assert.withMessage(@src(), self.first != null, "self.first is null");
             if (other.first) |node| {
                 self.last.next = node;
                 self.last = other.last;
@@ -94,7 +94,11 @@ pub fn Circular(comptime T: type) type {
 
         pub fn remove(self: *Self, node: *Node) void {
             if (node.next == node) {
-                assert.withMessage(node.prev == node and self.head == node, "tried to remove node from list not containing it");
+                assert.withMessage(
+                    @src(),
+                    node.prev == node and self.head == node,
+                    "tried to remove node from list not containing it",
+                );
                 self.head = null;
                 return;
             }
@@ -109,7 +113,7 @@ pub fn Circular(comptime T: type) type {
         }
 
         pub fn prependOne(self: *Self, node: *Node) void {
-            assert.withMessage(node.next == node and node.prev == node, "prependOne: node is not isolated");
+            assert.withMessage(@src(), node.next == node and node.prev == node, "node is not isolated");
             self.prependNodes(node);
         }
 
@@ -122,7 +126,7 @@ pub fn Circular(comptime T: type) type {
         }
 
         pub fn appendOne(self: *Self, node: *Node) void {
-            assert.withMessage(node.next == node and node.prev == node, "appendOne: node is not isolated");
+            assert.withMessage(@src(), node.next == node and node.prev == node, "node is not isolated");
             self.appendNodes(node);
         }
     };

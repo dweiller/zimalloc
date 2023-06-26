@@ -115,7 +115,7 @@ pub fn Allocator(comptime config: Config) type {
                             const data = metadata.map.get(@intFromPtr(ptr)) orelse {
                                 @panic("large allocation metadata is missing");
                             };
-                            assert.withMessage(data.is_huge, "metadata flag is_huge is not set");
+                            assert.withMessage(@src(), data.is_huge, "metadata flag is_huge is not set");
                             return heap_data;
                         }
                     }
@@ -124,7 +124,7 @@ pub fn Allocator(comptime config: Config) type {
                 const segment = Segment.ofPtr(ptr);
                 const owning_heap = segment.heap;
                 const heap_data = @fieldParentPtr(ThreadHeapData, "heap", owning_heap);
-                assert.withMessage(&heap_data.heap == owning_heap, "getMetadata: heap metadata corrupt");
+                assert.withMessage(@src(), &heap_data.heap == owning_heap, "heap metadata corrupt");
 
                 if (config.safety_checks) if (!self.ownsHeap(owning_heap)) return error.BadHeap;
 
@@ -135,7 +135,7 @@ pub fn Allocator(comptime config: Config) type {
 
             fn heapMetadataUnsafe(self: *Self, heap: *Heap) *Metadata {
                 const thread_heap_data = @fieldParentPtr(ThreadHeapData, "heap", heap);
-                assert.withMessage(self == thread_heap_data.owner, "heap not owned by allocator");
+                assert.withMessage(@src(), self == thread_heap_data.owner, "heap not owned by allocator");
                 return &thread_heap_data.metadata;
             }
         } else struct {};
@@ -159,7 +159,7 @@ pub fn Allocator(comptime config: Config) type {
             comptime lock_held: bool,
         ) ?[*]u8 {
             if (config.memory_limit) |limit| {
-                assert.withMessage(self.stats.total_allocated_memory <= limit, "alloc: corrupt stats");
+                assert.withMessage(@src(), self.stats.total_allocated_memory <= limit, "corrupt stats");
                 if (len + limit > self.stats.total_allocated_memory) {
                     log.warn("allocation would exceed memory limit", .{});
                     return null;
@@ -191,6 +191,7 @@ pub fn Allocator(comptime config: Config) type {
             const metadata = &heap_data.metadata;
 
             assert.withMessage(
+                @src(),
                 heap.thread_id == std.Thread.getCurrentId(),
                 "tried to allocated from wrong thread",
             );
@@ -260,7 +261,7 @@ pub fn Allocator(comptime config: Config) type {
                     }
                 }
             }
-            assert.withMessage(buf.len <= constants.max_slot_size_large_page, "free: tried to free unowned pointer");
+            assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
 
             const segment = Segment.ofPtr(buf.ptr);
             const heap = segment.heap;
@@ -288,7 +289,7 @@ pub fn Allocator(comptime config: Config) type {
 
             if (config.track_allocations) {
                 const metadata = self.heapMetadataUnsafe(heap);
-                assert.withMessage(metadata.map.remove(@intFromPtr(buf.ptr)), "free: allocation metadata is missing");
+                assert.withMessage(@src(), metadata.map.remove(@intFromPtr(buf.ptr)), "allocation metadata is missing");
             }
 
             const backing_size = heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
@@ -314,19 +315,19 @@ pub fn Allocator(comptime config: Config) type {
 
             if (config.track_allocations) {
                 const metadata = self.heapMetadataUnsafe(heap);
-                assert.withMessage(metadata.map.remove(@intFromPtr(buf.ptr)), "free: huge allocation metadata is missing");
+                assert.withMessage(@src(), metadata.map.remove(@intFromPtr(buf.ptr)), "huge allocation metadata is missing");
             }
         }
 
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
-            assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "alloc: ctx is not aligned");
+            assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
             return self.allocate(len, log2_align, ret_addr, false);
         }
 
         fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
-            assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "resize: ctx is not aligned");
+            assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
             const new_total_allocated_memory = if (config.memory_limit) |_|
@@ -356,7 +357,7 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
-            assert.withMessage(std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "free: ctx is not aligned");
+            assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
             self.deallocate(buf, log2_align, ret_addr, false);

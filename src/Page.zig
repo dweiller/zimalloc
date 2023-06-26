@@ -53,7 +53,7 @@ pub fn deinit(self: *Page) !void {
         self.other_free_list.first.?;
 
     const page_index = segment.pageIndex(ptr_in_page);
-    assert.withMessage(&segment.pages[page_index].data == self, "Page.deinit: freelists are corrupt");
+    assert.withMessage(@src(), &segment.pages[page_index].data == self, "freelists are corrupt");
 
     log.debug("deiniting page {d} in segment {*}", .{ page_index, segment });
     segment.init_set.unset(page_index);
@@ -78,6 +78,7 @@ pub fn migrateFreeList(self: *Page) void {
     });
 
     assert.withMessage(
+        @src(),
         self.alloc_free_list.first == null,
         "migrating free lists when alloc_free_list is not empty",
     );
@@ -137,8 +138,8 @@ pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyo
 }
 
 pub fn freeLocalAligned(self: *Page, slot: Slot) void {
-    assert.withMessage(self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free local slot not in the page");
-    assert.withMessage(self.used_count > 0, "tried to free local slot while used_count is 0");
+    assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free local slot not in the page");
+    assert.withMessage(@src(), self.used_count > 0, "tried to free local slot while used_count is 0");
 
     const node_ptr = @ptrCast(*FreeList.Node, slot);
     self.local_free_list.prepend(node_ptr);
@@ -146,8 +147,8 @@ pub fn freeLocalAligned(self: *Page, slot: Slot) void {
 }
 
 pub fn freeOtherAligned(self: *Page, slot: Slot) void {
-    assert.withMessage(self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free foreign slot not in the page");
-    assert.withMessage(self.used_count > 0, "tried to free foreign slot while used_count is 0");
+    assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free foreign slot not in the page");
+    assert.withMessage(@src(), self.used_count > 0, "tried to free foreign slot while used_count is 0");
 
     const node = @ptrCast(*FreeList.Node, slot);
     node.next = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
