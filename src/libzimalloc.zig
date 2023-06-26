@@ -15,7 +15,7 @@ var metadata = std.AutoHashMap(usize, AllocData){
 
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});
-    return allocateBytes(len, 0, false);
+    return allocateBytes(len, 0, @returnAddress(), false, false);
 }
 
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
@@ -39,7 +39,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
             return ptr;
         }
 
-        const new_mem = allocator.rawAlloc(len, 0, @returnAddress()) orelse {
+        const new_mem = allocateBytes(len, 0, @returnAddress(), false, false) orelse {
             log.debug("out of memory", .{});
             return null;
         };
@@ -47,12 +47,12 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         const copy_len = @min(len, old_slice.len);
         @memcpy(new_mem[0..copy_len], old_slice);
 
-        allocator.rawFree(old_slice, 0, @returnAddress());
+        allocator_instance.deallocate(old_slice, 0, @returnAddress(), false);
 
         log.debug("reallocated pointer: {*}", .{new_mem});
         return new_mem;
     }
-    return allocateBytes(len, 0, false);
+    return allocateBytes(len, 0, @returnAddress(), false, false);
 }
 
 export fn free(ptr_opt: ?*anyopaque) void {
@@ -86,12 +86,12 @@ export fn free(ptr_opt: ?*anyopaque) void {
 export fn calloc(size: usize, count: usize) ?*anyopaque {
     log.debug("calloc {d} {d}", .{ size, count });
     const bytes = size * count;
-    return allocateBytes(bytes, 0, true);
+    return allocateBytes(bytes, 0, @returnAddress(), true, false);
 }
 
 export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
     log.debug("aligned_alloc alignment={d}, size={d}", .{ alignment, size });
-    return allocateBytes(size, std.math.log2_int(usize, alignment), false);
+    return allocateBytes(size, std.math.log2_int(usize, alignment), @returnAddress(), false, false);
 }
 
 export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int {
@@ -101,7 +101,7 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
         return @intFromEnum(std.os.E.INVAL);
     }
 
-    if (allocateBytes(size, std.math.log2_int(usize, alignment), false)) |p| {
+    if (allocateBytes(size, std.math.log2_int(usize, alignment), @returnAddress(), false, false)) |p| {
         ptr.* = p;
         return 0;
     }
@@ -111,24 +111,30 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
 
 export fn memalign(alignment: usize, size: usize) ?*anyopaque {
     log.debug("memalign alignment={d}, size={d}", .{ alignment, size });
-    return allocateBytes(size, std.math.log2_int(usize, alignment), false);
+    return allocateBytes(size, std.math.log2_int(usize, alignment), @returnAddress(), false, false);
 }
 
 export fn valloc(size: usize) ?*anyopaque {
     log.debug("valloc {d}", .{size});
-    return allocateBytes(size, std.math.log2_int(usize, std.mem.page_size), false);
+    return allocateBytes(size, std.math.log2_int(usize, std.mem.page_size), @returnAddress(), false, false);
 }
 
 export fn pvalloc(size: usize) ?*anyopaque {
     log.debug("pvalloc {d}", .{size});
     const aligned_size = std.mem.alignForward(usize, size, std.mem.page_size);
-    return allocateBytes(aligned_size, std.math.log2_int(usize, std.mem.page_size), false);
+    return allocateBytes(aligned_size, std.math.log2_int(usize, std.mem.page_size), @returnAddress(), false, false);
 }
 
-fn allocateBytes(byte_count: usize, log2_align: u6, comptime zero: bool) ?*anyopaque {
+fn allocateBytes(
+    byte_count: usize,
+    log2_align: u6,
+    ret_addr: usize,
+    comptime zero: bool,
+    comptime holding_lock: bool,
+) ?[*]u8 {
     if (byte_count == 0) return null;
 
-    if (allocator.rawAlloc(byte_count, log2_align, @returnAddress())) |ptr| {
+    if (allocator_instance.allocate(byte_count, log2_align, ret_addr, holding_lock)) |ptr| {
         const min_alignment = constants.min_slot_size_usize_count * @sizeOf(usize);
         const casted_ptr = @alignCast(min_alignment, ptr);
         @memset(casted_ptr[0..byte_count], if (zero) 0 else undefined);
