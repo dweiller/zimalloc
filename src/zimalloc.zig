@@ -1,4 +1,5 @@
 pub const Allocator = @import("allocator.zig").Allocator;
+pub const Config = @import("allocator.zig").Config;
 pub const Heap = @import("Heap.zig");
 
 test {
@@ -12,8 +13,29 @@ test {
     _ = @import("libzimalloc.zig");
 }
 
-test "basic validation" {
-    var gpa = Allocator(.{}){};
+const configs = configs: {
+    const memory_limit = [_]?usize{ null, 165536 };
+    const track_allocations = [_]bool{ false, true };
+    const safety_checks = [_]bool{ false, true };
+
+    const config_count = memory_limit.len * track_allocations.len * safety_checks.len;
+    var result: [config_count]Config = undefined;
+
+    var index = 0;
+
+    for (memory_limit) |limit| for (track_allocations) |track| for (safety_checks) |safety| {
+        result[index] = Config{
+            .memory_limit = limit,
+            .track_allocations = track,
+            .safety_checks = safety,
+        };
+        index += 1;
+    };
+    break :configs result;
+};
+
+fn testValidateConfig(comptime config: Config) !void {
+    var gpa = Allocator(config){};
     defer gpa.deinit();
 
     const allocator = gpa.allocator();
@@ -24,8 +46,12 @@ test "basic validation" {
     try std.heap.testAllocatorAlignedShrink(allocator);
 }
 
-test "create/destroy loop" {
-    var gpa = Allocator(.{}){};
+test "basic validation" {
+    inline for (configs) |config| try testValidateConfig(config);
+}
+
+fn testCreateDestroyLoop(comptime config: Config) !void {
+    var gpa = Allocator(config){};
     defer gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -34,6 +60,10 @@ test "create/destroy loop" {
         var ptr = try allocator.create(u32);
         allocator.destroy(ptr);
     }
+}
+
+test "create/destroy loop" {
+    inline for (configs) |config| try testCreateDestroyLoop(config);
 }
 
 const std = @import("std");

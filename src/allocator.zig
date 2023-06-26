@@ -43,10 +43,10 @@ pub fn Allocator(comptime config: Config) type {
             owner: *Self,
         };
 
-        pub fn init(backing_allocator: std.mem.Allocator, thread_count: usize) error{OutOfMemory}!Self {
+        pub fn init(backing_allocator: std.mem.Allocator) error{OutOfMemory}!Self {
             return .{
                 .backing_allocator = backing_allocator,
-                .thread_heaps = try backing_allocator.alloc(ThreadHeapData, thread_count),
+                .thread_heaps = .{},
             };
         }
 
@@ -160,7 +160,7 @@ pub fn Allocator(comptime config: Config) type {
         ) ?[*]u8 {
             if (config.memory_limit) |limit| {
                 assert.withMessage(@src(), self.stats.total_allocated_memory <= limit, "corrupt stats");
-                if (len + limit > self.stats.total_allocated_memory) {
+                if (len + self.stats.total_allocated_memory > limit) {
                     log.warn("allocation would exceed memory limit", .{});
                     return null;
                 }
@@ -214,7 +214,7 @@ pub fn Allocator(comptime config: Config) type {
                 // TODO: this shouldn't be possible, heap.allocate() should respect
                 //       the limit, and this if statement can be replaced with an assert
                 if (self.stats.total_allocated_memory > limit) {
-                    heap.deallocate(allocation.ptr, log2_align, ret_addr);
+                    _ = heap.deallocate(allocation.ptr[0..len], log2_align, ret_addr);
                     self.stats.total_allocated_memory -= allocation.backing_size;
                     return null;
                 }
@@ -296,7 +296,7 @@ pub fn Allocator(comptime config: Config) type {
 
             if (config.memory_limit) |_| {
                 // this might race with concurrernt alloc
-                self.stats.total_memory_allocated -= backing_size;
+                self.stats.total_allocated_memory -= backing_size;
             }
         }
 
@@ -330,12 +330,9 @@ pub fn Allocator(comptime config: Config) type {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
 
-            const new_total_allocated_memory = if (config.memory_limit) |_|
-                (self.stats.total_allocated_memory - buf.len + new_len)
-            else {};
-
             if (config.memory_limit) |limit| {
-                if (new_total_allocated_memory > limit) {
+                const new_total = self.stats.total_allocated_memory - buf.len + new_len;
+                if (new_total > limit) {
                     return false;
                 }
             }
