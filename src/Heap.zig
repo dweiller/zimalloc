@@ -229,12 +229,11 @@ pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) u
 // returns the backing size of the `buf`; behaviour is undefined if
 // `self` does not own `buf.ptr`.
 pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
-    if (self.huge_allocations.contains(@intFromPtr(buf.ptr))) {
-        self.deallocateHuge(buf, log2_align, ret_addr);
-        return;
+    if (self.huge_allocations.contains(buf.ptr)) {
+        return self.deallocateHuge(buf, log2_align, ret_addr);
     }
     const segment = Segment.ofPtr(buf.ptr);
-    return self.deallocateInSegment(buf, log2_align, ret_addr, segment);
+    return self.deallocateInSegment(segment, buf, log2_align, ret_addr);
 }
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
@@ -372,3 +371,30 @@ const sizeClass = size_class.branching.ofSize;
 const HugeAllocTable = @import("HugeAllocTable.zig");
 const Page = @import("Page.zig");
 const Segment = @import("Segment.zig");
+
+test "basic validation" {
+    var heap = Heap.init();
+    defer heap.deinit();
+
+    const ally = heap.allocator();
+
+    try std.heap.testAllocator(ally);
+    try std.heap.testAllocatorAligned(ally);
+    try std.heap.testAllocatorLargeAlignment(ally);
+    try std.heap.testAllocatorAlignedShrink(ally);
+}
+
+test "create/destroy loop" {
+    var heap = Heap.init();
+    defer heap.deinit();
+    const ally = heap.allocator();
+
+    inline for (0..size_class_count) |class| {
+        const size = comptime indexToSize(class);
+        for (0..1000) |i| {
+            std.log.debug("iteration {d}", .{i});
+            var ptr = try ally.create([size]u8);
+            ally.destroy(ptr);
+        }
+    }
+}

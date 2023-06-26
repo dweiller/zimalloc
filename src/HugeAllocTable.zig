@@ -11,6 +11,13 @@ pub fn init(allocator: std.mem.Allocator) HugeAllocTable {
         .mutex = .{},
     };
 }
+
+pub fn deinit(self: *HugeAllocTable) void {
+    self.mutex.lock();
+    self.hash_map.deinit();
+    self.* = undefined;
+}
+
 pub fn lock(self: *HugeAllocTable) void {
     self.mutex.lock();
 }
