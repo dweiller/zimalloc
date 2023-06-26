@@ -31,7 +31,7 @@ const configs = configs: {
 };
 
 fn testValidateConfig(comptime config: Config) !void {
-    var gpa = Allocator(config){};
+    var gpa = try Allocator(config).init(std.heap.page_allocator);
     defer gpa.deinit();
 
     const allocator = gpa.allocator();
@@ -47,7 +47,7 @@ test "basic validation" {
 }
 
 fn testCreateDestroyLoop(comptime config: Config) !void {
-    var gpa = Allocator(config){};
+    var gpa = try Allocator(config).init(std.heap.page_allocator);
     defer gpa.deinit();
     const allocator = gpa.allocator();
 

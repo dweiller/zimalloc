@@ -3,8 +3,7 @@ const build_options = @import("build_options");
 const ZiAllocator = @import("zimalloc").Allocator;
 
 pub fn main() !void {
-    var zigpa = ZiAllocator(.{}){};
-    defer zigpa.deinit();
+    var zigpa = try ZiAllocator(.{}).init(std.heap.page_allocator);
 
     const allocator = zigpa.allocator();
 

@@ -10,6 +10,7 @@ pub fn Allocator(comptime config: Config) type {
         thread_heaps: std.SegmentedList(Heap, config.thread_data_prealloc) = .{},
         thread_heaps_lock: std.Thread.RwLock = .{},
         // TODO: atomic access
+        segment_map: *SegmentMap,
 
         const Self = @This();
 
@@ -17,6 +18,7 @@ pub fn Allocator(comptime config: Config) type {
             return .{
                 .backing_allocator = backing_allocator,
                 .thread_heaps = .{},
+                .segment_map = try SegmentMap.init(backing_allocator, 0, constants.max_address),
             };
         }
 
@@ -279,3 +281,4 @@ const log = @import("log.zig");
 
 const Heap = @import("Heap.zig");
 const Segment = @import("Segment.zig");
+const SegmentMap = @import("SegmentMap.zig");

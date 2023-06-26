@@ -1,4 +1,5 @@
-pub const segment_alignment = 1 << 23; // 8 MiB
+pub const segment_alignment_log2 = 23;
+pub const segment_alignment = 1 << segment_alignment_log2; // 8 MiB
 pub const segment_size = segment_alignment;
 
 pub const small_page_size = 1 << 16; // 64 KiB
@@ -20,5 +21,12 @@ pub const min_slot_alignment = 1 << min_slot_alignment_log2;
 pub const min_slots_per_page = 8;
 pub const max_slot_size_small_page = small_page_size / min_slots_per_page;
 pub const max_slot_size_large_page = segment_size / min_slots_per_page;
+
+// TODO: make this a compile option or work out how to detect it
+pub const max_address_bits = 48;
+pub const max_address = (1 << max_address_bits) - 1;
+
+pub const total_segment_count_log2 = max_address_bits - segment_alignment_log2;
+pub const total_segment_count = 1 << segment_alignment_log2;
 
 const std = @import("std");

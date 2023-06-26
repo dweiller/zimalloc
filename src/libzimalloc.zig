@@ -1,5 +1,8 @@
 var allocator_instance = zimalloc.Allocator(.{}){};
 
+const min_address = 0;
+const segment_count = (constants.max_address - min_address) / constants.segment_size;
+
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});
     return allocateBytes(len, 1, @returnAddress(), false, false, true);
