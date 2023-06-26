@@ -51,7 +51,16 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         pub fn deinit(self: *Self) void {
-            _ = self;
+            var heap_iter = self.thread_heaps.iterator(0);
+            while (heap_iter.next()) |heap_data| {
+                if (config.track_allocations) {
+                    heap_data.metadata.mutex.lock();
+                    heap_data.metadata.map.deinit(self.backing_allocator);
+                }
+                heap_data.heap.deinit();
+            }
+            self.thread_heaps.deinit(self.backing_allocator);
+            self.* = undefined;
         }
 
         fn initHeapForThread(
