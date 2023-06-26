@@ -29,17 +29,6 @@ pub fn deinit(self: *Heap) void {
     self.huge_allocations.deinit(std.heap.page_allocator);
 }
 
-pub fn allocator(self: *Heap) std.mem.Allocator {
-    return .{
-        .ptr = self,
-        .vtable = &.{
-            .alloc = alloc,
-            .resize = resize,
-            .free = free,
-        },
-    };
-}
-
 pub const Alloc = struct {
     ptr: [*]align(constants.min_slot_alignment) u8,
     backing_size: usize,
@@ -258,21 +247,6 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void 
     self.deallocateInSegment(segment, buf.ptr, log2_align, ret_addr);
 }
 
-fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
-    const self: *@This() = @ptrCast(@alignCast(ctx));
-    return if (self.allocate(len, log2_align, ret_addr)) |a| a.ptr else null;
-}
-
-fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
-    const self: *@This() = @ptrCast(@alignCast(ctx));
-    return self.canResizeInPlace(buf, log2_align, new_len, ret_addr);
-}
-
-fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
-    const self: *@This() = @ptrCast(@alignCast(ctx));
-    _ = self.deallocate(buf, log2_align, ret_addr);
-}
-
 fn getSegmentWithEmptySlot(self: *Heap, slot_size: u32) ?Segment.Ptr {
     var segment_iter = self.segments;
     while (segment_iter) |node| : (segment_iter = node.next) {
@@ -401,33 +375,6 @@ const sizeClass = size_class.branching.ofSize;
 const HugeAllocTable = @import("HugeAllocTable.zig");
 const Page = @import("Page.zig");
 const Segment = @import("Segment.zig");
-
-test "basic validation" {
-    var heap = Heap.init();
-    defer heap.deinit();
-
-    const ally = heap.allocator();
-
-    try std.heap.testAllocator(ally);
-    try std.heap.testAllocatorAligned(ally);
-    try std.heap.testAllocatorLargeAlignment(ally);
-    try std.heap.testAllocatorAlignedShrink(ally);
-}
-
-test "create/destroy loop" {
-    var heap = Heap.init();
-    defer heap.deinit();
-    const ally = heap.allocator();
-
-    inline for (0..size_class_count) |class| {
-        const size = comptime indexToSize(class);
-        for (0..1000) |i| {
-            std.log.debug("iteration {d}", .{i});
-            var ptr = try ally.create([size]u8);
-            ally.destroy(ptr);
-        }
-    }
-}
 
 test "slot alignment" {
     var heap = Heap.init();
