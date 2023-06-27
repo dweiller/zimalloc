@@ -49,15 +49,17 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) v
     }
 }
 
-pub fn deinit(self: *Page) !void {
-    const segment = Segment.ofPtr(self);
+pub fn deinit(self: *Page, segment_map: SegmentMap.Ptr) !void {
     const ptr_in_page = self.getPtrInFreeSlot();
 
-    const page_index = segment.pageIndex(ptr_in_page);
-    assert.withMessage(@src(), &segment.pages[page_index].data == self, "freelists are corrupt");
+    const descriptor = segment_map.descriptorOfPtr(ptr_in_page);
+    const segment = &descriptor.segment;
 
-    log.debug("deiniting page {d} in segment {*}", .{ page_index, segment });
-    segment.init_set.unset(page_index);
+    const page_index = segment.pageIndex(ptr_in_page);
+    assert.withMessage(@src(), &descriptor.pages[page_index].data == self, "freelists are corrupt");
+
+    log.debug("deiniting page {d} in segment {*}", .{ page_index, segment.start });
+    descriptor.init_set.unset(page_index);
 
     const page_bytes = segment.pageSlice(page_index);
     try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
@@ -137,22 +139,27 @@ fn slotIndexOfPtr(first_slot_address: usize, slot_size: usize, ptr: *const anyop
     return (bytes_address - first_slot_address) / slot_size;
 }
 
-/// returns the `Slot` containing `bytes.ptr`
-pub fn containingSlot(self: *const Page, ptr: *const anyopaque) Slot {
-    const segment = Segment.ofPtr(self);
-    return self.containingSlotSegment(segment, ptr);
-}
+/// returns the `Slot` containing `bytes.ptr`. Asserts that `ptr` is in `segment`.
+pub fn containingSlot(self: *const Page, segment: Segment, ptr: *const anyopaque) Slot {
+    assert.withMessage(@src(), @intFromPtr(segment.start) <= @intFromPtr(ptr), "segment does not contain ptr");
+    assert.withMessage(
+        @src(),
+        @intFromPtr(ptr) <= @intFromPtr(segment.start) + constants.segment_size,
+        "segment does not contain ptr",
+    );
 
-/// returns the `Slot` containing `bytes.ptr`
-pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *const anyopaque) Slot {
     const page_slice = segment.pageSlice(segment.pageIndex(ptr));
     const first_slot_address = firstSlotAddress(@intFromPtr(page_slice.ptr), self.slot_size);
     const index = slotIndexOfPtr(first_slot_address, self.slot_size, ptr);
     return slotAtIndex(first_slot_address, index, self.slot_size);
 }
 
-pub fn freeLocalAligned(self: *Page, slot: Slot) void {
-    assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free local slot not in the page");
+pub fn freeLocalAligned(self: *Page, segment: Segment, slot: Slot) void {
+    assert.withMessage(
+        @src(),
+        self.containingSlot(segment, slot.ptr).ptr == slot.ptr,
+        "tried to free local slot not in the page",
+    );
     assert.withMessage(@src(), self.used_count > 0, "tried to free local slot while used_count is 0");
 
     const node_ptr: *FreeList.Node = @ptrCast(slot);
@@ -160,8 +167,12 @@ pub fn freeLocalAligned(self: *Page, slot: Slot) void {
     self.used_count -= 1;
 }
 
-pub fn freeOtherAligned(self: *Page, slot: Slot) void {
-    assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free foreign slot not in the page");
+pub fn freeOtherAligned(self: *Page, segment: Segment, slot: Slot) void {
+    assert.withMessage(
+        @src(),
+        self.containingSlot(segment, slot.ptr).ptr == slot.ptr,
+        "tried to free foreign slot not in the page",
+    );
     assert.withMessage(@src(), self.used_count > 0, "tried to free foreign slot while used_count is 0");
 
     const node: *FreeList.Node = @ptrCast(slot);
@@ -186,3 +197,4 @@ const list = @import("list.zig");
 const log = @import("log.zig");
 
 const Segment = @import("Segment.zig");
+const SegmentMap = @import("SegmentMap.zig");

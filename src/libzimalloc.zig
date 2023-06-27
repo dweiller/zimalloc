@@ -1,16 +1,25 @@
-var allocator_instance = zimalloc.Allocator(.{}){};
+var allocator_instance = zimalloc.Allocator(.{}){ .segment_map = undefined };
 
 const min_address = 0;
 const segment_count = (constants.max_address - min_address) / constants.segment_size;
 
+var segment_map_initialised = false;
+
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});
-    return allocateBytes(len, 1, @returnAddress(), false, false, true);
+    return allocateBytes(len, 1, @returnAddress(), false, false, true, true);
 }
 
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
     log.debug("realloc {?*} {d}", .{ ptr_opt, len });
     if (ptr_opt) |ptr| {
+        if (!segment_map_initialised) {
+            allocator_instance.segment_map = SegmentMap.init(min_address, constants.max_address) catch {
+                log.err("could not initialise segment map", .{});
+                return null;
+            };
+            segment_map_initialised = true;
+        }
         const old_size = allocator_instance.usableSize(ptr);
 
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
@@ -21,7 +30,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
             return ptr;
         }
 
-        const new_mem = allocateBytes(len, 1, @returnAddress(), false, false, true) orelse
+        const new_mem = allocateBytes(len, 1, @returnAddress(), false, false, true, false) orelse
             return null;
 
         const copy_len = @min(len, old_slice.len);
@@ -32,7 +41,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         log.debug("reallocated pointer: {*}", .{new_mem});
         return new_mem;
     }
-    return allocateBytes(len, 1, @returnAddress(), false, false, true);
+    return allocateBytes(len, 1, @returnAddress(), false, false, true, true);
 }
 
 export fn free(ptr_opt: ?*anyopaque) void {
@@ -59,12 +68,12 @@ export fn free(ptr_opt: ?*anyopaque) void {
 export fn calloc(size: usize, count: usize) ?*anyopaque {
     log.debug("calloc {d} {d}", .{ size, count });
     const bytes = size * count;
-    return allocateBytes(bytes, 1, @returnAddress(), true, false, true);
+    return allocateBytes(bytes, 1, @returnAddress(), true, false, true, true);
 }
 
 export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
     log.debug("aligned_alloc alignment={d}, size={d}", .{ alignment, size });
-    return allocateBytes(size, alignment, @returnAddress(), false, true, true);
+    return allocateBytes(size, alignment, @returnAddress(), false, true, true, true);
 }
 
 export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int {
@@ -79,7 +88,7 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
         return @intFromEnum(std.os.E.INVAL);
     }
 
-    if (allocateBytes(size, alignment, @returnAddress(), false, false, false)) |p| {
+    if (allocateBytes(size, alignment, @returnAddress(), false, false, false, true)) |p| {
         ptr.* = p;
         return 0;
     }
@@ -89,18 +98,18 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
 
 export fn memalign(alignment: usize, size: usize) ?*anyopaque {
     log.debug("memalign alignment={d}, size={d}", .{ alignment, size });
-    return allocateBytes(size, alignment, @returnAddress(), false, true, true);
+    return allocateBytes(size, alignment, @returnAddress(), false, true, true, true);
 }
 
 export fn valloc(size: usize) ?*anyopaque {
     log.debug("valloc {d}", .{size});
-    return allocateBytes(size, std.mem.page_size, @returnAddress(), false, false, true);
+    return allocateBytes(size, std.mem.page_size, @returnAddress(), false, false, true, true);
 }
 
 export fn pvalloc(size: usize) ?*anyopaque {
     log.debug("pvalloc {d}", .{size});
     const aligned_size = std.mem.alignForward(usize, size, std.mem.page_size);
-    return allocateBytes(aligned_size, std.mem.page_size, @returnAddress(), false, false, true);
+    return allocateBytes(aligned_size, std.mem.page_size, @returnAddress(), false, false, true, true);
 }
 
 export fn malloc_usable_size(ptr_opt: ?*anyopaque) usize {
@@ -118,8 +127,19 @@ fn allocateBytes(
     comptime zero: bool,
     comptime check_alignment: bool,
     comptime set_errno: bool,
+    comptime check_segment_map: bool,
 ) ?[*]u8 {
     if (byte_count == 0) return null;
+
+    if (check_segment_map) {
+        if (!segment_map_initialised) {
+            allocator_instance.segment_map = SegmentMap.init(min_address, constants.max_address) catch {
+                log.err("could not initialise segment map", .{});
+                return null;
+            };
+            segment_map_initialised = true;
+        }
+    }
 
     if (check_alignment) {
         if (!set_errno) @compileError("check_alignment requires set_errno to be true");
@@ -163,4 +183,4 @@ const constants = @import("constants.zig");
 
 const build_options = @import("build_options");
 
-const Segment = @import("Segment.zig");
+const SegmentMap = @import("SegmentMap.zig");

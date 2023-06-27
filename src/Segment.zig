@@ -1,13 +1,13 @@
 page_shift: std.math.Log2Int(usize),
-init_set: PageBitSet,
-pages: [small_page_count]Page.List.Node,
 page_count: u32,
-heap: *Heap,
-next: ?Ptr,
-prev: ?Ptr,
+start: Ptr,
+next: ?*Segment,
+prev: ?*Segment,
 
-pub const Ptr = *align(segment_alignment) @This();
-pub const ConstPtr = *align(segment_alignment) const @This();
+const Segment = @This();
+
+pub const Ptr = [*]align(segment_alignment) u8;
+pub const ConstPtr = [*]align(segment_alignment) const u8;
 
 pub const PageSize = union(enum) {
     small,
@@ -25,63 +25,58 @@ pub fn pageSize(slot_size: u32) PageSize {
         unreachable;
 }
 
-pub fn ofPtr(ptr: *const anyopaque) Ptr {
+pub fn startPtr(ptr: *const anyopaque) Ptr {
     const address = std.mem.alignBackward(usize, @intFromPtr(ptr), segment_alignment);
     return @ptrFromInt(address);
 }
 
-pub fn init(heap: *Heap, page_size: PageSize) ?Ptr {
+pub fn init(page_size: PageSize) ?Segment {
     const raw_ptr = allocateSegment() orelse return null;
-    const self: Ptr = @ptrCast(raw_ptr);
     switch (page_size) {
-        .small => {
-            self.* = .{
-                .pages = undefined,
-                .page_shift = small_page_shift,
-                .page_count = small_page_count,
-                .init_set = PageBitSet.initEmpty(),
-                .heap = heap,
-                .next = null,
-                .prev = null,
-            };
+        .small => return .{
+            .page_shift = small_page_shift,
+            .page_count = small_page_count,
+            .start = raw_ptr,
+            .next = null,
+            .prev = null,
         },
-        .large => {
-            self.* = .{
-                .pages = undefined,
-                .page_shift = large_page_shift,
-                .page_count = 1,
-                .init_set = PageBitSet.initEmpty(),
-                .heap = heap,
-                .next = null,
-                .prev = null,
-            };
+        .large => return .{
+            .page_shift = large_page_shift,
+            .page_count = 1,
+            .start = raw_ptr,
+            .next = null,
+            .prev = null,
         },
     }
-    return self;
 }
 
-pub fn deinit(self: Ptr) void {
-    self.deallocateSegment();
+pub fn deinit(self: *Segment) void {
+    deallocateSegment(self.start);
+    self.page_shift = 0;
+    self.page_count = 0;
+    self.start = undefined;
 }
 
-pub fn pageIndex(self: ConstPtr, ptr: *const anyopaque) usize {
-    assert.withMessage(@src(), @intFromPtr(self) < @intFromPtr(ptr), "pointer address is lower than the page address");
-    return (@intFromPtr(ptr) - @intFromPtr(self)) >> self.page_shift;
+pub fn pageIndex(self: Segment, ptr: *const anyopaque) usize {
+    assert.withMessage(
+        @src(),
+        @intFromPtr(self.start) <= @intFromPtr(ptr),
+        "pointer address is lower than the segment start address",
+    );
+    assert.withMessage(
+        @src(),
+        @intFromPtr(ptr) < @intFromPtr(self.start) + constants.segment_size,
+        "pointer address is greater than the segment end address",
+    );
+
+    return (@intFromPtr(ptr) - @intFromPtr(self.start)) >> self.page_shift;
 }
 
-pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
-    if (index == 0) {
-        const segment_end = @intFromPtr(self) + @sizeOf(@This());
-        const address = std.mem.alignForward(usize, segment_end, std.mem.page_size);
-        const page_size = (@as(usize, 1) << self.page_shift) - segment_first_page_offset;
-        const bytes_ptr: [*]align(std.mem.page_size) u8 = @ptrFromInt(address);
-        return bytes_ptr[0..page_size];
-    } else {
-        assert.withMessage(@src(), self.page_shift == small_page_shift, "corrupt page_shift or index");
-        const address = @intFromPtr(self) + index * small_page_size;
-        const bytes_ptr: [*]align(std.mem.page_size) u8 = @ptrFromInt(address);
-        return bytes_ptr[0..small_page_size];
-    }
+pub fn pageSlice(self: Segment, index: usize) []align(std.mem.page_size) u8 {
+    const page_size = @as(usize, 1) << self.page_shift;
+    const address: usize = page_size * index + @intFromPtr(self.start);
+    const slice_ptr: [*]u8 = @ptrFromInt(address);
+    return @alignCast(slice_ptr[0..page_size]);
 }
 
 fn allocateSegment() ?*align(segment_alignment) [segment_size]u8 {
@@ -91,9 +86,8 @@ fn allocateSegment() ?*align(segment_alignment) [segment_size]u8 {
         null;
 }
 
-fn deallocateSegment(self: Ptr) void {
-    const ptr: *align(segment_alignment) [segment_size]u8 = @ptrCast(self);
-    huge_alignment.deallocate(ptr);
+fn deallocateSegment(ptr: Ptr) void {
+    huge_alignment.deallocate(ptr[0..constants.segment_size]);
 }
 
 const PageBitSet = std.StaticBitSet(small_page_count);
@@ -103,7 +97,6 @@ const std = @import("std");
 const assert = @import("assert.zig");
 const huge_alignment = @import("huge_alignment.zig");
 
-const Heap = @import("Heap.zig");
 const Page = @import("Page.zig");
 
 const constants = @import("constants.zig");

@@ -10,7 +10,7 @@ pub fn Allocator(comptime config: Config) type {
         thread_heaps: std.SegmentedList(Heap, config.thread_data_prealloc) = .{},
         thread_heaps_lock: std.Thread.RwLock = .{},
         // TODO: atomic access
-        segment_map: *SegmentMap,
+        segment_map: SegmentMap.Ptr,
 
         const Self = @This();
 
@@ -18,7 +18,7 @@ pub fn Allocator(comptime config: Config) type {
             return .{
                 .backing_allocator = backing_allocator,
                 .thread_heaps = .{},
-                .segment_map = try SegmentMap.init(backing_allocator, 0, constants.max_address),
+                .segment_map = try SegmentMap.init(constants.min_address, constants.max_address),
             };
         }
 
@@ -29,6 +29,7 @@ pub fn Allocator(comptime config: Config) type {
                 heap.deinit();
             }
             self.thread_heaps.deinit(self.backing_allocator);
+            self.segment_map.deinit();
             self.* = undefined;
         }
 
@@ -79,8 +80,11 @@ pub fn Allocator(comptime config: Config) type {
                 }
             }
 
-            const segment = Segment.ofPtr(ptr);
-            const heap = segment.heap;
+            const descriptor = self.segment_map.descriptorOfPtr(ptr);
+            const heap = descriptor.heap;
+
+            if (!descriptor.in_use) return null;
+            assert.withMessage(@src(), !descriptor.is_huge, "corrupt huge allocation table or segment descriptor");
 
             if (config.safety_checks) {
                 if (!self.ownsHeap(heap)) return null;
@@ -133,14 +137,13 @@ pub fn Allocator(comptime config: Config) type {
             log2_align: u8,
             ret_addr: usize,
         ) ?[*]align(constants.min_slot_alignment) u8 {
-            _ = self;
             assert.withMessage(
                 @src(),
                 heap.thread_id == std.Thread.getCurrentId(),
                 "tried to allocated from wrong thread",
             );
 
-            const allocation = heap.allocate(len, log2_align, ret_addr) orelse return null;
+            const allocation = heap.allocate(self.segment_map, len, log2_align, ret_addr) orelse return null;
 
             return allocation.ptr;
         }
@@ -169,22 +172,20 @@ pub fn Allocator(comptime config: Config) type {
             }
             assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
 
-            const segment = Segment.ofPtr(buf.ptr);
-            const heap = segment.heap;
+            const descriptor = self.segment_map.descriptorOfPtr(buf.ptr);
+            const heap = descriptor.heap;
 
             self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
         }
 
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
             log.debug("freeing non-huge allocation", .{});
-            const segment = Segment.ofPtr(ptr);
-
             if (config.safety_checks) if (!self.ownsHeap(heap)) {
                 log.err("invalid free: {*} is not part of an owned heap", .{ptr});
                 return;
             };
 
-            heap.deallocateInSegment(segment, ptr, log2_align, ret_addr);
+            heap.deallocateInSegment(self.segment_map, ptr, log2_align, ret_addr);
         }
 
         pub fn freeHugeFromHeap(
@@ -206,17 +207,18 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         pub fn usableSizeInSegment(self: *Self, ptr: *const anyopaque) usize {
-            const segment = Segment.ofPtr(ptr);
+            const descriptor = self.segment_map.descriptorOfPtr(ptr);
+            const segment = descriptor.segment;
 
-            if (config.safety_checks) if (!self.ownsHeap(segment.heap)) {
+            if (config.safety_checks) if (!self.ownsHeap(descriptor.heap)) {
                 log.err("invalid pointer: {*} is not part of an owned heap", .{ptr});
                 return 0;
             };
 
             const page_index = segment.pageIndex(ptr);
-            const page_node = &segment.pages[page_index];
+            const page_node = &descriptor.pages[page_index];
             const page = &page_node.data;
-            const slot = page.containingSlotSegment(segment, ptr);
+            const slot = page.containingSlot(segment, ptr);
             const offset = @intFromPtr(ptr) - @intFromPtr(slot.ptr);
             return slot.len - offset;
         }
@@ -245,7 +247,7 @@ pub fn Allocator(comptime config: Config) type {
                 } else unreachable;
             };
 
-            return owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
+            return owning_heap.resizeWithMap(self.segment_map, buf, log2_align, new_len, ret_addr);
         }
 
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
