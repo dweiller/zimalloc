@@ -49,7 +49,7 @@ pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?A
     log.debug("allocate: huge allocation len={d}, log2_align={d}", .{ len, log2_align });
     assert.withMessage(
         @src(),
-        @as(usize, 1) << @intCast(std.math.Log2Int(usize), log2_align) <= std.mem.page_size,
+        @as(usize, 1) << @intCast(log2_align) <= std.mem.page_size,
         "requested alignment is greater than the system page size",
     );
 
@@ -63,7 +63,7 @@ pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?A
     const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
     self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr);
     return .{
-        .ptr = @alignCast(constants.min_slot_alignment, ptr),
+        .ptr = @alignCast(ptr),
         .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
     };
 }
@@ -84,7 +84,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
         log.debugVerbose("alloc fast path", .{});
         const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
         return .{
-            .ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, aligned_address),
+            .ptr = @ptrFromInt(aligned_address),
             .backing_size = buf.len,
         };
     }
@@ -97,7 +97,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
         log.debugVerbose("alloc slow path (first page)", .{});
         const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
         return .{
-            .ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, aligned_address),
+            .ptr = @ptrFromInt(aligned_address),
             .backing_size = buf.len,
         };
     }
@@ -137,7 +137,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
     };
     const aligned_address = std.mem.alignForwardLog2(@intFromPtr(slot.ptr), log2_align);
     return .{
-        .ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, aligned_address),
+        .ptr = @ptrFromInt(aligned_address),
         .backing_size = slot.len,
     };
 }
@@ -158,7 +158,7 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
     const slot_size_min = if (log2_align <= next_size_log2_align)
         len
     else blk: {
-        const alignment = @as(usize, 1) << @intCast(std.math.Log2Int(usize), log2_align);
+        const alignment = @as(usize, 1) << @intCast(log2_align);
         break :blk len + alignment - 1;
     };
 
@@ -238,17 +238,17 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize
 }
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
-    const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
+    const self: *@This() = @ptrCast(@alignCast(ctx));
     return if (self.allocate(len, log2_align, ret_addr)) |a| a.ptr else null;
 }
 
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
-    const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
+    const self: *@This() = @ptrCast(@alignCast(ctx));
     return self.resizeInPlace(buf, log2_align, new_len, ret_addr);
 }
 
 fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
-    const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
+    const self: *@This() = @ptrCast(@alignCast(ctx));
     _ = self.deallocate(buf, log2_align, ret_addr);
 }
 

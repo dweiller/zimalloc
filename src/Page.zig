@@ -23,7 +23,7 @@ comptime {
 }
 
 pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) void {
-    const capacity = @intCast(u16, bytes.len / slot_size);
+    const capacity: u16 = @intCast(bytes.len / slot_size);
     self.* = .{
         .local_free_list = .{ .first = null, .last = undefined },
         .alloc_free_list = .{ .first = null, .last = undefined },
@@ -38,8 +38,8 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) v
     while (slot_index > 0) {
         slot_index -= 1;
         const byte_index = slot_index * slot_size;
-        const slot = @alignCast(@alignOf(FreeList.Node), bytes[byte_index..][0..slot_size]);
-        const node_ptr = @ptrCast(*FreeList.Node, slot);
+        const slot = bytes[byte_index..][0..slot_size];
+        const node_ptr = @as(*FreeList.Node, @alignCast(@ptrCast(slot)));
         node_ptr.* = .{ .next = null, .data = {} };
 
         self.alloc_free_list.prepend(node_ptr);
@@ -73,9 +73,9 @@ pub const Slot = []align(constants.min_slot_alignment) u8;
 
 pub fn allocSlotFast(self: *Page) ?Slot {
     const node_ptr = self.alloc_free_list.popFirst() orelse return null;
-    const casted_ptr = @ptrCast([*]align(constants.min_slot_alignment) u8, node_ptr);
+    const casted_ptr: [*]align(constants.min_slot_alignment) u8 = @ptrCast(node_ptr);
     self.used_count += 1;
-    return @ptrCast(Slot, casted_ptr[0..self.slot_size]);
+    return @ptrCast(casted_ptr[0..self.slot_size]);
 }
 
 pub fn migrateFreeList(self: *Page) void {
@@ -141,7 +141,7 @@ pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyo
     const bytes_address = @intFromPtr(ptr);
     const index = (bytes_address - page_address) / self.slot_size;
     const slot_address = page_address + index * self.slot_size;
-    const slot_ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, slot_address);
+    const slot_ptr: [*]align(constants.min_slot_alignment) u8 = @ptrFromInt(slot_address);
     return slot_ptr[0..self.slot_size];
 }
 
@@ -149,7 +149,7 @@ pub fn freeLocalAligned(self: *Page, slot: Slot) void {
     assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free local slot not in the page");
     assert.withMessage(@src(), self.used_count > 0, "tried to free local slot while used_count is 0");
 
-    const node_ptr = @ptrCast(*FreeList.Node, slot);
+    const node_ptr: *FreeList.Node = @ptrCast(slot);
     self.local_free_list.prepend(node_ptr);
     self.used_count -= 1;
 }
@@ -158,7 +158,7 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
     assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free foreign slot not in the page");
     assert.withMessage(@src(), self.used_count > 0, "tried to free foreign slot while used_count is 0");
 
-    const node = @ptrCast(*FreeList.Node, slot);
+    const node: *FreeList.Node = @ptrCast(slot);
     node.next = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
     // TODO: figure out correct atomic orders
     _ = @atomicRmw(SlotCountInt, &self.other_freed, .Add, 1, .AcqRel);

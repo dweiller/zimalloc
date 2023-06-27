@@ -27,12 +27,12 @@ pub fn pageSize(slot_size: u32) PageSize {
 
 pub fn ofPtr(ptr: *const anyopaque) Ptr {
     const address = std.mem.alignBackward(usize, @intFromPtr(ptr), segment_alignment);
-    return @ptrFromInt(Ptr, address);
+    return @ptrFromInt(address);
 }
 
 pub fn init(heap: *Heap, page_size: PageSize) ?Ptr {
     const raw_ptr = allocateSegment() orelse return null;
-    const self = @ptrCast(Ptr, raw_ptr);
+    const self: Ptr = @ptrCast(raw_ptr);
     switch (page_size) {
         .small => {
             self.* = .{
@@ -74,11 +74,13 @@ pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
         const segment_end = @intFromPtr(self) + @sizeOf(@This());
         const address = std.mem.alignForward(usize, segment_end, std.mem.page_size);
         const page_size = (@as(usize, 1) << self.page_shift) - segment_first_page_offset;
-        return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..page_size];
+        const bytes_ptr: [*]align(std.mem.page_size) u8 = @ptrFromInt(address);
+        return bytes_ptr[0..page_size];
     } else {
         assert.withMessage(@src(), self.page_shift == small_page_shift, "corrupt page_shift or index");
         const address = @intFromPtr(self) + index * small_page_size;
-        return @alignCast(std.mem.page_size, @ptrFromInt([*]u8, address))[0..small_page_size];
+        const bytes_ptr: [*]align(std.mem.page_size) u8 = @ptrFromInt(address);
+        return bytes_ptr[0..small_page_size];
     }
 }
 
@@ -91,17 +93,17 @@ fn allocateSegment() ?*align(segment_alignment) [segment_size]u8 {
     const aligned_address = std.mem.alignForward(usize, unaligned_address, segment_alignment);
     if (aligned_address == unaligned_address) {
         std.os.munmap(unaligned[segment_size..]);
-        return @alignCast(segment_alignment, unaligned[0..segment_size]);
+        return @alignCast(unaligned[0..segment_size]);
     } else {
         const offset = aligned_address - unaligned_address;
         std.os.munmap(unaligned[0..offset]);
-        std.os.munmap(@alignCast(std.mem.page_size, unaligned[offset + segment_size ..]));
-        return @alignCast(segment_alignment, unaligned[offset..][0..segment_size]);
+        std.os.munmap(@alignCast(unaligned[offset + segment_size ..]));
+        return @alignCast(unaligned[offset..][0..segment_size]);
     }
 }
 
 fn deallocateSegment(self: Ptr) void {
-    const ptr = @ptrCast(*align(segment_alignment) [segment_size]u8, self);
+    const ptr: *align(segment_alignment) [segment_size]u8 = @ptrCast(self);
     std.os.munmap(ptr);
 }
 

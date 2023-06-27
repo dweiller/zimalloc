@@ -321,14 +321,14 @@ pub fn Allocator(comptime config: Config) type {
 
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
-            const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
+            const self: *@This() = @ptrCast(@alignCast(ctx));
 
             return self.allocate(len, log2_align, ret_addr, false);
         }
 
         fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
-            const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
+            const self: *@This() = @ptrCast(@alignCast(ctx));
 
             if (config.memory_limit) |limit| {
                 const new_total = self.stats.total_allocated_memory - buf.len + new_len;
@@ -355,7 +355,7 @@ pub fn Allocator(comptime config: Config) type {
 
         fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
-            const self = @ptrCast(*@This(), @alignCast(@alignOf(@This()), ctx));
+            const self: *@This() = @ptrCast(@alignCast(ctx));
 
             self.deallocate(buf, log2_align, ret_addr, false);
         }

@@ -32,7 +32,8 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
             return null;
         };
 
-        const old_slice = @ptrCast([*]u8, ptr)[0..alloc.size];
+        const bytes_ptr: [*]u8 = @ptrCast(ptr);
+        const old_slice = bytes_ptr[0..alloc.size];
 
         if (allocator.rawResize(old_slice, 0, len, @returnAddress())) {
             log.debug("keeping old pointer", .{});
@@ -69,7 +70,8 @@ export fn free(ptr_opt: ?*anyopaque) void {
             return;
         };
 
-        const slice = @ptrCast([*]u8, ptr)[0..alloc.size];
+        const bytes_ptr: [*]u8 = @ptrCast(ptr);
+        const slice = bytes_ptr[0..alloc.size];
         if (slice.len == 0) return;
 
         @memset(slice, undefined);
@@ -135,10 +137,9 @@ fn allocateBytes(
     if (byte_count == 0) return null;
 
     if (allocator_instance.allocate(byte_count, log2_align, ret_addr, holding_lock)) |ptr| {
-        const casted_ptr = @alignCast(constants.min_slot_alignment, ptr);
-        @memset(casted_ptr[0..byte_count], if (zero) 0 else undefined);
-        log.debug("allocated {*}", .{casted_ptr});
-        return casted_ptr;
+        @memset(ptr[0..byte_count], if (zero) 0 else undefined);
+        log.debug("allocated {*}", .{ptr});
+        return ptr;
     }
     log.debug("out of memory", .{});
     return null;
