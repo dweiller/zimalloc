@@ -135,8 +135,7 @@ fn allocateBytes(
     if (byte_count == 0) return null;
 
     if (allocator_instance.allocate(byte_count, log2_align, ret_addr, holding_lock)) |ptr| {
-        const min_alignment = constants.min_slot_size_usize_count * @sizeOf(usize);
-        const casted_ptr = @alignCast(min_alignment, ptr);
+        const casted_ptr = @alignCast(constants.min_slot_alignment, ptr);
         @memset(casted_ptr[0..byte_count], if (zero) 0 else undefined);
         log.debug("allocated {*}", .{casted_ptr});
         return casted_ptr;

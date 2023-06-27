@@ -39,7 +39,7 @@ pub fn allocator(self: *Heap) std.mem.Allocator {
 }
 
 pub const Alloc = struct {
-    ptr: [*]u8,
+    ptr: [*]align(constants.min_slot_alignment) u8,
     backing_size: usize,
 };
 
@@ -63,7 +63,7 @@ pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?A
     const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
     self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr);
     return .{
-        .ptr = ptr,
+        .ptr = @alignCast(constants.min_slot_alignment, ptr),
         .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
     };
 }
@@ -84,7 +84,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
         log.debugVerbose("alloc fast path", .{});
         const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
         return .{
-            .ptr = @ptrFromInt([*]u8, aligned_address),
+            .ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, aligned_address),
             .backing_size = buf.len,
         };
     }
@@ -97,7 +97,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
         log.debugVerbose("alloc slow path (first page)", .{});
         const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
         return .{
-            .ptr = @ptrFromInt([*]u8, aligned_address),
+            .ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, aligned_address),
             .backing_size = buf.len,
         };
     }
@@ -137,7 +137,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
     };
     const aligned_address = std.mem.alignForwardLog2(@intFromPtr(slot.ptr), log2_align);
     return .{
-        .ptr = @ptrFromInt([*]u8, aligned_address),
+        .ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, aligned_address),
         .backing_size = slot.len,
     };
 }
