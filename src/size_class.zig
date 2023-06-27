@@ -15,9 +15,9 @@ pub const branchless = struct {
         const b = step_divisions -| index;
         const c = step_divisions - b;
         const base = (c + 1) * @sizeOf(usize);
-        const size_shift = @intCast(ShiftInt, a / step_divisions);
+        const size_shift: ShiftInt = @intCast(a / step_divisions);
         const i = a % step_divisions;
-        return @intCast(u32, base + i * @sizeOf(usize) * 1 << size_shift);
+        return @intCast(base + i * @sizeOf(usize) * 1 << size_shift);
     }
 
     /// asserts `len > 0`
@@ -124,13 +124,13 @@ pub const branching = struct {
 
     pub fn toSize(index: usize) u32 {
         if (index < first_general_index) {
-            return @intCast(u32, @sizeOf(usize) * (index + 1));
+            return @intCast(@sizeOf(usize) * (index + 1));
         } else {
             const s = index - first_general_index + 1;
-            const size_shift = @intCast(ShiftInt, s / step_divs);
+            const size_shift: ShiftInt = @intCast(s / step_divs);
             const i = s % step_divs;
 
-            return @intCast(u32, last_special_size + i * step_size_base * 1 << size_shift);
+            return @intCast(last_special_size + i * step_size_base * 1 << size_shift);
         }
     }
 
@@ -198,7 +198,7 @@ pub const branching = struct {
 };
 
 inline fn leading_bit_index(a: usize) ShiftInt {
-    return @intCast(ShiftInt, @bitSizeOf(usize) - 1 - @clz(a));
+    return @intCast(@bitSizeOf(usize) - 1 - @clz(a));
 }
 
 const std = @import("std");
