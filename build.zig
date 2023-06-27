@@ -92,6 +92,7 @@ pub fn build(b: *std.Build) void {
         standalone_test_build_step.dependOn(&install_step.step);
 
         const run_step = b.addRunArtifact(test_exe);
+        run_step.step.dependOn(&install_step.step);
         standalone_test_step.dependOn(&run_step.step);
     }
 }
