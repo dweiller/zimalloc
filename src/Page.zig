@@ -14,11 +14,11 @@ pub const List = list.Circular(Page);
 pub const FreeList = list.Appendable(void);
 
 comptime {
-    if (@sizeOf(FreeList.Node) > constants.min_slot_size_usize_count * @sizeOf(usize)) {
+    if (@sizeOf(FreeList.Node) > constants.min_slot_size) {
         @compileError("FreeList.Node must fit inside the minimum slot size");
     }
-    if (@alignOf(FreeList.Node) > constants.min_slot_size_usize_count * @sizeOf(usize)) {
-        @compileError("FreeList.Node must have alignment no greater than the minimum slot size");
+    if (@alignOf(FreeList.Node) > constants.min_slot_alignment) {
+        @compileError("FreeList.Node must have alignment no greater than the minimum slot alignmentk");
     }
 }
 
@@ -62,12 +62,13 @@ pub fn deinit(self: *Page) !void {
     try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
 }
 
-pub const Slot = []align(8) u8;
+pub const Slot = []align(constants.min_slot_alignment) u8;
 
 pub fn allocSlotFast(self: *Page) ?Slot {
     const node_ptr = self.alloc_free_list.popFirst() orelse return null;
+    const casted_ptr = @ptrCast([*]align(constants.min_slot_alignment) u8, node_ptr);
     self.used_count += 1;
-    return @ptrCast([*]u8, node_ptr)[0..self.slot_size];
+    return @ptrCast(Slot, casted_ptr[0..self.slot_size]);
 }
 
 pub fn migrateFreeList(self: *Page) void {
@@ -133,8 +134,8 @@ pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyo
     const bytes_address = @intFromPtr(ptr);
     const index = (bytes_address - page_address) / self.slot_size;
     const slot_address = page_address + index * self.slot_size;
-    const slot = @ptrFromInt([*]align(8) u8, slot_address)[0..self.slot_size];
-    return slot;
+    const slot_ptr = @ptrFromInt([*]align(constants.min_slot_alignment) u8, slot_address);
+    return slot_ptr[0..self.slot_size];
 }
 
 pub fn freeLocalAligned(self: *Page, slot: Slot) void {

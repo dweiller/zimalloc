@@ -157,7 +157,7 @@ pub fn Allocator(comptime config: Config) type {
             log2_align: u8,
             ret_addr: usize,
             comptime lock_held: bool,
-        ) ?[*]u8 {
+        ) ?[*]align(constants.min_slot_alignment) u8 {
             if (config.memory_limit) |limit| {
                 assert.withMessage(@src(), self.stats.total_allocated_memory <= limit, "corrupt stats");
                 if (len + self.stats.total_allocated_memory > limit) {
@@ -186,7 +186,7 @@ pub fn Allocator(comptime config: Config) type {
             log2_align: u8,
             ret_addr: usize,
             comptime lock_held: bool,
-        ) ?[*]u8 {
+        ) ?[*]align(constants.min_slot_alignment) u8 {
             const heap = &heap_data.heap;
             const metadata = &heap_data.metadata;
 
