@@ -48,9 +48,7 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) v
 
 pub fn deinit(self: *Page) !void {
     const segment = Segment.ofPtr(self);
-    const ptr_in_page = self.alloc_free_list.first orelse
-        self.local_free_list.first orelse
-        self.other_free_list.first.?;
+    const ptr_in_page = self.getPtrInFreeSlot();
 
     const page_index = segment.pageIndex(ptr_in_page);
     assert.withMessage(@src(), &segment.pages[page_index].data == self, "freelists are corrupt");
@@ -60,6 +58,15 @@ pub fn deinit(self: *Page) !void {
 
     const page_bytes = segment.pageSlice(page_index);
     try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
+}
+
+pub fn getPtrInFreeSlot(self: *const Page) *align(constants.min_slot_alignment) anyopaque {
+    return self.alloc_free_list.first orelse
+        self.local_free_list.first orelse
+        self.other_free_list.first orelse {
+        assert.withMessage(@src(), false, "all freelists are empty");
+        unreachable;
+    };
 }
 
 pub const Slot = []align(constants.min_slot_alignment) u8;
