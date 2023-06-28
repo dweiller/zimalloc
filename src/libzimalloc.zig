@@ -40,10 +40,8 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
             return ptr;
         }
 
-        const new_mem = allocateBytes(len, 1, @returnAddress(), false, false) orelse {
-            log.debug("out of memory", .{});
+        const new_mem = allocateBytes(len, 1, @returnAddress(), false, false) orelse
             return null;
-        };
 
         const copy_len = @min(len, old_slice.len);
         @memcpy(new_mem[0..copy_len], old_slice);
@@ -98,6 +96,11 @@ export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
 
 export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int {
     log.debug("posix_memalign ptr={*}, alignment={d}, size={d}", .{ ptr, alignment, size });
+
+    if (size == 0) {
+        ptr.* = null;
+        return 0;
+    }
 
     if (@popCount(alignment) != 1 or alignment < @sizeOf(*anyopaque)) {
         return @intFromEnum(std.os.E.INVAL);
