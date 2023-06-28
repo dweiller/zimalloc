@@ -15,7 +15,7 @@ var metadata = std.AutoHashMap(usize, AllocData){
 
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});
-    return allocateBytes(len, 1, @returnAddress(), false, false);
+    return allocateBytes(len, 1, @returnAddress(), false, false, true);
 }
 
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
@@ -40,7 +40,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
             return ptr;
         }
 
-        const new_mem = allocateBytes(len, 1, @returnAddress(), false, false) orelse
+        const new_mem = allocateBytes(len, 1, @returnAddress(), false, false, true) orelse
             return null;
 
         const copy_len = @min(len, old_slice.len);
@@ -51,7 +51,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         log.debug("reallocated pointer: {*}", .{new_mem});
         return new_mem;
     }
-    return allocateBytes(len, 1, @returnAddress(), false, false);
+    return allocateBytes(len, 1, @returnAddress(), false, false, true);
 }
 
 export fn free(ptr_opt: ?*anyopaque) void {
@@ -86,12 +86,12 @@ export fn free(ptr_opt: ?*anyopaque) void {
 export fn calloc(size: usize, count: usize) ?*anyopaque {
     log.debug("calloc {d} {d}", .{ size, count });
     const bytes = size * count;
-    return allocateBytes(bytes, 1, @returnAddress(), true, false);
+    return allocateBytes(bytes, 1, @returnAddress(), true, false, true);
 }
 
 export fn aligned_alloc(alignment: usize, size: usize) ?*anyopaque {
     log.debug("aligned_alloc alignment={d}, size={d}", .{ alignment, size });
-    return allocateBytes(size, alignment, @returnAddress(), false, true);
+    return allocateBytes(size, alignment, @returnAddress(), false, true, true);
 }
 
 export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int {
@@ -106,7 +106,7 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
         return @intFromEnum(std.os.E.INVAL);
     }
 
-    if (allocateBytes(size, alignment, @returnAddress(), false, true)) |p| {
+    if (allocateBytes(size, alignment, @returnAddress(), false, false, false)) |p| {
         ptr.* = p;
         return 0;
     }
@@ -116,18 +116,18 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
 
 export fn memalign(alignment: usize, size: usize) ?*anyopaque {
     log.debug("memalign alignment={d}, size={d}", .{ alignment, size });
-    return allocateBytes(size, alignment, @returnAddress(), false, true);
+    return allocateBytes(size, alignment, @returnAddress(), false, true, true);
 }
 
 export fn valloc(size: usize) ?*anyopaque {
     log.debug("valloc {d}", .{size});
-    return allocateBytes(size, std.mem.page_size, @returnAddress(), false, false);
+    return allocateBytes(size, std.mem.page_size, @returnAddress(), false, false, true);
 }
 
 export fn pvalloc(size: usize) ?*anyopaque {
     log.debug("pvalloc {d}", .{size});
     const aligned_size = std.mem.alignForward(usize, size, std.mem.page_size);
-    return allocateBytes(aligned_size, std.mem.page_size, @returnAddress(), false, false);
+    return allocateBytes(aligned_size, std.mem.page_size, @returnAddress(), false, false, true);
 }
 
 fn allocateBytes(
@@ -136,12 +136,15 @@ fn allocateBytes(
     ret_addr: usize,
     comptime zero: bool,
     comptime check_alignment: bool,
+    comptime set_errno: bool,
 ) ?[*]u8 {
     if (byte_count == 0) return null;
 
     if (check_alignment) {
+        if (!set_errno) @compileError("check_alignment requries set_errno to be true");
         if (!std.mem.isValidAlign(alignment)) {
             invalid("invalid alignment: {d}", .{alignment});
+            setErrno(.INVAL);
             return null;
         }
     }
@@ -153,6 +156,7 @@ fn allocateBytes(
         return ptr;
     }
     log.debug("out of memory", .{});
+    if (set_errno) setErrno(.NOMEM);
     return null;
 }
 
@@ -162,6 +166,10 @@ fn invalid(comptime fmt: []const u8, args: anytype) void {
     } else {
         log.err(fmt, args);
     }
+}
+
+fn setErrno(code: std.c.E) void {
+    std.c._errno().* = @intFromEnum(code);
 }
 
 const std = @import("std");

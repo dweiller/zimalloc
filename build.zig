@@ -49,6 +49,7 @@ pub fn build(b: *std.Build) void {
         .version = libzimalloc_version,
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     libzimalloc.addModule("build_options", zimalloc_options);
     libzimalloc.force_pic = true;
@@ -60,6 +61,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "src/zimalloc.zig" },
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     tests.addModule("build_options", zimalloc_options);
 
