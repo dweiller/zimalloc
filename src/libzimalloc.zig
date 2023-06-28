@@ -130,6 +130,26 @@ export fn pvalloc(size: usize) ?*anyopaque {
     return allocateBytes(aligned_size, std.mem.page_size, @returnAddress(), false, false, true);
 }
 
+export fn malloc_usable_size(ptr_opt: ?*anyopaque) usize {
+    log.debug("malloc_usable_size {?*}", .{ptr_opt});
+    if (ptr_opt) |ptr| {
+        const heap_data = allocator_instance.getThreadData(ptr, true) catch {
+            invalid("invalid malloc_usable_size: {*} - no valid heap", .{ptr});
+            return 0;
+        };
+        defer heap_data.metadata.mutex.unlock();
+
+        const alloc = heap_data.metadata.map.get(@intFromPtr(ptr)) orelse {
+            invalid("invalid malloc_usable_size: {*}", .{ptr});
+            return 0;
+        };
+
+        if (alloc.is_huge) return heap_data.heap.huge_allocations.get(ptr) orelse 0;
+        return allocator_instance.usableSizeSegment(ptr) orelse 0;
+    }
+    return 0;
+}
+
 fn allocateBytes(
     byte_count: usize,
     alignment: usize,
