@@ -21,16 +21,16 @@ export fn malloc(len: usize) ?*anyopaque {
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
     log.debug("realloc {?*} {d}", .{ ptr_opt, len });
     if (ptr_opt) |ptr| {
-        const heap_data = allocator_instance.getThreadData(ptr, false) catch {
+        const heap_data = allocator_instance.getThreadData(ptr, true) catch {
             invalid("invalid realloc: {*} - no valid heap", .{ptr});
             return null;
         };
-        // defer heap_data.metadata.mutex.unlock();
 
         const alloc = heap_data.metadata.map.get(@intFromPtr(ptr)) orelse {
             invalid("invalid resize: {*}", .{ptr});
             return null;
         };
+        heap_data.metadata.mutex.unlock();
 
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
         const old_slice = bytes_ptr[0..alloc.size];
