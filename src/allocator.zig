@@ -319,6 +319,39 @@ pub fn Allocator(comptime config: Config) type {
             }
         }
 
+        pub fn usableSizeSegment(self: *Self, ptr: *anyopaque) ?usize {
+            const segment = Segment.ofPtr(ptr);
+
+            if (config.safety_checks) if (!self.ownsHeap(segment.heap)) {
+                log.err("invalid pointer: {*} is not part of an owned heap", .{ptr});
+                return null;
+            };
+
+            const page_index = segment.pageIndex(ptr);
+            const page_node = &segment.pages[page_index];
+            const page = &page_node.data;
+            const slot = page.containingSlotSegment(segment, ptr);
+            const offset = @intFromPtr(ptr) - @intFromPtr(slot.ptr);
+            return slot.len - offset;
+        }
+
+        pub fn usableSize(self: *Self, ptr: *anyopaque, comptime lock_held: bool) ?usize {
+            if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
+                var heap_iter = self.thread_heaps.iterator(0);
+                while (heap_iter.next()) |heap_data| {
+                    if (!lock_held) heap_data.heap.huge_allocations.lock();
+                    defer if (!lock_held) heap_data.heap.huge_allocations.unlock();
+
+                    if (heap_data.heap.huge_allocations.getRaw(ptr)) |size| {
+                        // WARNING: this depends on the implementation of std.heap.PageAllocator
+                        // aligning allocated lengths to the page size
+                        return std.mem.alignForward(usize, size, std.mem.page_size);
+                    }
+                }
+            }
+            return self.usableSizeSegment(ptr);
+        }
+
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self: *@This() = @ptrCast(@alignCast(ctx));

@@ -61,7 +61,7 @@ pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?A
         return null;
     };
     const ptr = std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
-    self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr);
+    self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr, len);
     return .{
         .ptr = @alignCast(ptr),
         .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),

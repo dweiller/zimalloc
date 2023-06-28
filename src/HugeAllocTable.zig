@@ -3,7 +3,7 @@ mutex: std.Thread.Mutex,
 
 const HugeAllocTable = @This();
 
-const Map = std.AutoHashMap(usize, void);
+const Map = std.AutoHashMap(usize, usize);
 
 pub fn init(allocator: std.mem.Allocator) HugeAllocTable {
     return .{
@@ -63,48 +63,59 @@ pub fn ensureUnusedCapacityRaw(self: *HugeAllocTable, additional_count: u32) !vo
     return self.hash_map.ensureUnusedCapacity(additional_count);
 }
 
-pub fn putAssumeCapacityNoClobber(self: *HugeAllocTable, ptr: *anyopaque) !void {
+pub fn putAssumeCapacityNoClobber(self: *HugeAllocTable, ptr: *anyopaque, size: usize) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    return self.putAssumeCapacityNoClobberRaw(ptr);
+    return self.putAssumeCapacityNoClobberRaw(ptr, size);
 }
 
-pub fn putAssumeCapacityNoClobberRaw(self: *HugeAllocTable, ptr: *anyopaque) void {
-    return self.hash_map.putAssumeCapacityNoClobber(@intFromPtr(ptr), {});
+pub fn putAssumeCapacityNoClobberRaw(self: *HugeAllocTable, ptr: *anyopaque, size: usize) void {
+    return self.hash_map.putAssumeCapacityNoClobber(@intFromPtr(ptr), size);
 }
 
-pub fn putAssumeCapacity(self: *HugeAllocTable, ptr: *anyopaque) void {
+pub fn putAssumeCapacity(self: *HugeAllocTable, ptr: *anyopaque, size: usize) void {
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    return self.putAssumeCapacityRaw(ptr);
+    return self.putAssumeCapacityRaw(ptr, size);
 }
 
-pub fn putAssumeCapacityRaw(self: *HugeAllocTable, ptr: *anyopaque) !void {
-    return self.hash_map.putAssumeCapacity(@intFromPtr(ptr), {});
+pub fn putAssumeCapacityRaw(self: *HugeAllocTable, ptr: *anyopaque, size: usize) !void {
+    return self.hash_map.putAssumeCapacity(@intFromPtr(ptr), size);
 }
 
-pub fn putNoClobber(self: *HugeAllocTable, ptr: *anyopaque) !void {
+pub fn putNoClobber(self: *HugeAllocTable, ptr: *anyopaque, size: usize) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    return self.putNoClobberRaw(ptr);
+    return self.putNoClobberRaw(ptr, size);
 }
 
-pub fn putNoClobberRaw(self: *HugeAllocTable, ptr: *anyopaque) !void {
-    return self.hash_map.putNoClobber(@intFromPtr(ptr), {});
+pub fn putNoClobberRaw(self: *HugeAllocTable, ptr: *anyopaque, size: usize) !void {
+    return self.hash_map.putNoClobber(@intFromPtr(ptr), {}, size);
 }
 
-pub fn put(self: *HugeAllocTable, ptr: *anyopaque) !void {
+pub fn put(self: *HugeAllocTable, ptr: *anyopaque, size: usize) !void {
     self.mutex.lock();
     defer self.mutex.unlock();
 
-    return self.putRaw(ptr);
+    return self.putRaw(ptr, size);
 }
 
-pub fn putRaw(self: *HugeAllocTable, ptr: *anyopaque) !void {
-    return self.hash_map.put(@intFromPtr(ptr), {});
+pub fn putRaw(self: *HugeAllocTable, ptr: *anyopaque, size: usize) !void {
+    return self.hash_map.put(@intFromPtr(ptr), size);
+}
+
+pub fn get(self: *HugeAllocTable, ptr: *anyopaque) ?usize {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    return self.getRaw(ptr);
+}
+
+pub fn getRaw(self: *HugeAllocTable, ptr: *anyopaque) ?usize {
+    return self.hash_map.get(@intFromPtr(ptr));
 }
 
 const std = @import("std");
