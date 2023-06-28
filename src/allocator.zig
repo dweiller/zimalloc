@@ -168,12 +168,15 @@ pub fn Allocator(comptime config: Config) type {
 
             const thread_id = std.Thread.getCurrentId();
 
+            self.heaps_mutex.lock();
             var iter = self.thread_heaps.iterator(0);
             while (iter.next()) |heap_data| {
                 if (heap_data.heap.thread_id == thread_id) {
+                    self.heaps_mutex.unlock();
                     return self.allocInHeap(heap_data, len, log2_align, ret_addr, lock_held);
                 }
             } else {
+                self.heaps_mutex.unlock();
                 const heap_data = self.initHeapForThread() orelse return null;
                 return self.allocInHeap(heap_data, len, log2_align, ret_addr, lock_held);
             }
