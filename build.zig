@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
     libzimalloc.force_pic = true;
 
     const libzimalloc_install = b.addInstallArtifact(libzimalloc);
+    b.getInstallStep().dependOn(&libzimalloc_install.step);
     libzimalloc_step.dependOn(&libzimalloc_install.step);
 
     const tests = b.addTest(.{
