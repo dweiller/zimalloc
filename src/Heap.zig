@@ -77,7 +77,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
     );
 
     const page_list = &self.pages[class];
-    // we can use page_list.head is guaranteed non-null (see init())
+    // page_list.head is guaranteed non-null (see init())
     const page_node = page_list.head.?;
 
     if (page_node.data.allocSlotFast()) |buf| {
@@ -120,7 +120,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
                         self.releaseSegment(segment);
                     }
                 } else if (node.data.allocSlotFast()) |slot| {
-                    log.debugVerbose("found suitable page: {?*}", .{node.data.local_free_list.first});
+                    log.debugVerbose("found suitable page with empty slot at {*}", .{slot.ptr});
                     // rotate page list
                     page_list.head = node;
                     break :slot slot;
