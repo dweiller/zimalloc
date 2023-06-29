@@ -164,7 +164,12 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
 
     const class = sizeClass(slot_size_min);
 
-    return self.allocateSizeClass(class, log2_align);
+    if (self.allocateSizeClass(class, log2_align)) |allocation| {
+        @memset(allocation.ptr[0..indexToSize(class)], undefined);
+        return allocation;
+    }
+
+    return null;
 }
 
 pub fn resizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
