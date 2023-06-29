@@ -69,9 +69,9 @@ pub fn Allocator(comptime config: Config) type {
             const thread_id = std.Thread.getCurrentId();
             log.debug("initialising heap for thread {d}", .{thread_id});
 
-            std.log.debug("locking sema", .{});
+            log.debug("locking sema", .{});
             while (self.thread_heaps_sema.tryCompareAndSwap(1, 0, .Acquire, .Monotonic)) |v| {
-                std.log.debug("locking sema, value was {d}", .{v});
+                log.debug("locking sema, value was {d}", .{v});
             }
             defer self.thread_heaps_sema.store(1, .Release);
 
