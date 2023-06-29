@@ -170,11 +170,11 @@ pub fn Allocator(comptime config: Config) type {
             const thread_id = std.Thread.getCurrentId();
 
             while (true) {
-                log.info("checking sema is non-zero", .{});
+                log.debug("checking sema is non-zero", .{});
                 const v = self.thread_heaps_sema.tryCompareAndSwap(0, 0, .Acquire, .Monotonic) orelse continue;
-                log.info("sema was {d}", .{v});
+                log.debug("sema was {d}", .{v});
                 if (self.thread_heaps_sema.tryCompareAndSwap(v, v + 1, .Acquire, .Monotonic) == null) {
-                    log.info("incremented sema\n", .{});
+                    log.debug("incremented sema", .{});
                     break;
                 }
             }
