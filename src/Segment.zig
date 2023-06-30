@@ -85,21 +85,10 @@ pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
 }
 
 fn allocateSegment() ?*align(segment_alignment) [segment_size]u8 {
-    const mmap_length = segment_size + segment_alignment - 1;
-    const prot = std.os.PROT.READ | std.os.PROT.WRITE;
-    const flags = std.os.MAP.PRIVATE | std.os.MAP.ANONYMOUS;
-    const unaligned = std.os.mmap(null, mmap_length, prot, flags, -1, 0) catch return null;
-    const unaligned_address = @intFromPtr(unaligned.ptr);
-    const aligned_address = std.mem.alignForward(usize, unaligned_address, segment_alignment);
-    if (aligned_address == unaligned_address) {
-        std.os.munmap(unaligned[segment_size..]);
-        return @alignCast(unaligned[0..segment_size]);
-    } else {
-        const offset = aligned_address - unaligned_address;
-        std.os.munmap(unaligned[0..offset]);
-        std.os.munmap(@alignCast(unaligned[offset + segment_size ..]));
-        return @alignCast(unaligned[offset..][0..segment_size]);
-    }
+    return if (huge_alignment.allocate(segment_size, segment_alignment)) |ptr|
+        @alignCast(ptr[0..segment_size])
+    else
+        null;
 }
 
 fn deallocateSegment(self: Ptr) void {
@@ -112,6 +101,7 @@ const PageBitSet = std.StaticBitSet(small_page_count);
 const std = @import("std");
 
 const assert = @import("assert.zig");
+const huge_alignment = @import("huge_alignment.zig");
 
 const Heap = @import("Heap.zig");
 const Page = @import("Page.zig");
