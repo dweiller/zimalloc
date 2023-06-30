@@ -1,4 +1,4 @@
-page_shift: u6,
+page_shift: std.math.Log2Int(usize),
 init_set: PageBitSet,
 pages: [small_page_count]Page.List.Node,
 page_count: u32,
