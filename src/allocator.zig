@@ -39,6 +39,7 @@ pub fn Allocator(comptime config: Config) type {
 
         const ThreadHeapData = struct {
             heap: Heap,
+            huge_allocations: HugeAllocTable = .{},
             metadata: Metadata = if (config.track_allocations) .{} else {},
             owner: *Self,
         };
@@ -419,4 +420,5 @@ const constants = @import("constants.zig");
 const log = @import("log.zig");
 
 const Heap = @import("Heap.zig");
+const HugeAllocTable = @import("HugeAllocTable.zig");
 const Segment = @import("Segment.zig");
