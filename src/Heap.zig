@@ -14,7 +14,7 @@ pub fn init() Heap {
         // `isNullPageNode()` is used to check before any modifications are attempted.
         .pages = .{Page.List{ .head = @constCast(&null_page_list_node) }} ** size_class_count,
         .segments = null,
-        .huge_allocations = HugeAllocTable.init(std.heap.page_allocator),
+        .huge_allocations = .{},
     };
 }
 
@@ -24,7 +24,7 @@ pub fn deinit(self: *Heap) void {
         segment_iter = segment.next;
         segment.deinit();
     }
-    self.huge_allocations.deinit();
+    self.huge_allocations.deinit(std.heap.page_allocator);
 }
 
 pub fn allocator(self: *Heap) std.mem.Allocator {
@@ -51,7 +51,7 @@ pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?A
     self.huge_allocations.lock();
     defer self.huge_allocations.unlock();
 
-    self.huge_allocations.ensureUnusedCapacityRaw(1) catch {
+    self.huge_allocations.ensureUnusedCapacityRaw(std.heap.page_allocator, 1) catch {
         log.debug("could not expand huge alloc table", .{});
         return null;
     };
