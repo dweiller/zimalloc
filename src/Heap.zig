@@ -404,3 +404,25 @@ test "create/destroy loop" {
         }
     }
 }
+
+test "slot alignment" {
+    var heap = Heap.init();
+    defer heap.deinit();
+
+    for (0..size_class_count) |class| {
+        const allocation = heap.allocateSizeClass(class, 0) orelse {
+            log.err("failed to allocate size class {d}", .{class});
+            return error.BadSizeClass;
+        };
+        const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(allocation.ptr)));
+        try std.testing.expect(@ctz(indexToSize(class)) <= actual_log2_align);
+    }
+    for (0..size_class_count) |class| {
+        const log2_align = @ctz(indexToSize(class));
+        const allocation = heap.allocateSizeClass(class, log2_align) orelse {
+            log.err("failed to allocate size class {d}", .{class});
+            return error.BadSizeClass;
+        };
+        try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(allocation.ptr), log2_align));
+    }
+}
