@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v1.3.0
+        with:
+           version: master
+
+      - name: Check formatting
+        run: zig fmt --check .
+
+      - name: Run tests
+        run: zig build test
+
+      - name: Run standalone tests
+        run: zig build standalone
+
+      - name: Build libzimalloc
+        run: |
+          zig build libzimalloc -Doptimize=ReleaseSafe -p zig-out-release-safe
+          zig build libzimalloc -Doptimize=ReleaseFast -p zig-out-release-fast
+
+      - name: Upload libzimalloc
+        uses: actions/upload-artifact@v3
+        with:
+          name: libzimalloc
+          path: zig-out-*/lib/libzimalloc.so
+
+  mimalloc-bench-smoke-test:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          repository: daanx/mimalloc-bench
+
+      - name: Get revision
+        id: bench-revision
+        run: echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache benchmarks
+        id: cache-benchmarks
+        uses: actions/cache@v3
+        with:
+          path: |
+            extern/
+            out/
+          key: mimalloc-bench-${{ steps.bench-revision.outputs.revision }}
+
+      - name: Build benchmarks
+        if: steps.cache-benchmarks.outputs.cache-hit != 'true'
+        run: |
+          echo "::group::Install dos2unix"
+          sudo apt-get update
+          sudo apt-get install dos2unix
+          echo "::endgroup::"
+          echo "::group::Build"
+          ./build-bench-env.sh bench lean
+          echo "::endgroup::"
+
+      - name: Download libzimalloc artifact
+        id: download
+        uses: actions/download-artifact@v3
+        with:
+          name: libzimalloc
+          path: libzimalloc
+
+      - name: Setup benchmarks
+        id: bench-setup
+        run: |
+          echo "::group::Install ghostscript"
+          sudo apt-get update
+          sudo apt-get install ghostscript
+          echo "::endgroup::"
+          if command -v nproc > /dev/null; then
+            procs=$(nproc)
+            echo "::notice::Using $procs processors"
+            echo "procs=$procs" >> "$GITHUB_OUTPUT"
+            echo "procsx2=$((procs * 2))" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Could not get number or processors, defaulting to 8"
+            echo "procs=8" >> "$GITHUB_OUTPUT"
+            echo "procsx2=16" >> "$GITHUB_OUTPUT"
+          fi
+          echo "ld_preload=${{ steps.download.outputs.download-path }}/zig-out-release-safe/lib/libzimalloc.so" >> "$GITHUB_OUTPUT"
+
+      - name: Run mstress
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/mstress ${{ steps.bench-setup.outputs.procs }} 50 25
+
+      - name: Run cscratch
+        run: |
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/cache-scratch 1 1000 1 2000000 ${{ steps.bench-setup.outputs.procs }}
+          if test "${{ steps.bench-setup.outputs.procs }}" != "1"; then
+            LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/cache-scratch ${{ steps.bench-setup.outputs.procs }} 1000 1 2000000 ${{ steps.bench-setup.outputs.procs }}
+          fi
+
+      - name: Run cthrash
+        run: |
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/cache-thrash 1 1000 1 2000000 ${{ steps.bench-setup.outputs.procs }}
+          if test "${{ steps.bench-setup.outputs.procs }}" != "1"; then
+            LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/cache-thrash ${{ steps.bench-setup.outputs.procs }} 1000 1 2000000 ${{ steps.bench-setup.outputs.procs }}
+          fi
+
+      - name: Run gs
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" gs -dBATCH -dNODISPLAY extern/large.pdf
+
+      - name: Run glibc-thread
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/glibc-thread
+
+      - name: Run barnes
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/barnes < bench/barnes/input
+
+      - name: Run xmalloc-test
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/xmalloc-test -w ${{ steps.bench-setup.outputs.procs }} -t 5 -s 64
+
+      - name: Run malloc-large
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/malloc-large
+
+      - name: Run espresso
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/espresso bench/espresso/largest.espresso
+
+      - name: Run alloc-test
+        run: |
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/alloc-test 1
+          if test "${{ steps.bench-setup.outputs.procs }}" != "1"; then
+            if test $procs -gt 16; then
+              LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/alloc-test 16
+            else
+              LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/alloc-test ${{ steps.bench-setup.outputs.procs }}
+            fi
+          fi
+
+      - name: Run cfrac
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/cfrac 17545186520507317056371138836327483792789528
+
+      - name: Run sh6bench
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/sh6bench ${{ steps.bench-setup.outputs.procsx2 }}
+
+      - name: Run glibc-simple
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/glibc-simple
+
+      - name: Run lean
+        run: |
+          pushd extern/lean/library
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" ../bin/lean --make -j ${{ steps.bench-setup.outputs.procs }}
+          pushd ../out/release
+          make clean-olean
+          popd
+          popd
+
+      - name: Run sh8bench
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/sh8bench ${{ steps.bench-setup.outputs.procsx2 }}
+
