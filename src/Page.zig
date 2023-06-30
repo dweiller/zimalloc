@@ -23,7 +23,11 @@ comptime {
 }
 
 pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) void {
-    const capacity: u16 = @intCast(bytes.len / slot_size);
+    log.debug("initialising page with slot size {d} at {*} ({d} bytes)", .{ slot_size, bytes.ptr, bytes.len });
+    const first_slot_address = firstSlotAddress(@intFromPtr(bytes.ptr), slot_size);
+    const offset = first_slot_address - @intFromPtr(bytes.ptr);
+    const capacity: u16 = @intCast((bytes.len - offset) / slot_size);
+    assert.withMessage(@src(), capacity == bytes.len / slot_size, "capacity not correct");
     self.* = .{
         .local_free_list = .{ .first = null, .last = undefined },
         .alloc_free_list = .{ .first = null, .last = undefined },
@@ -37,9 +41,8 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) v
     var slot_index = capacity;
     while (slot_index > 0) {
         slot_index -= 1;
-        const byte_index = slot_index * slot_size;
-        const slot = bytes[byte_index..][0..slot_size];
-        const node_ptr = @as(*FreeList.Node, @alignCast(@ptrCast(slot)));
+        const slot = slotAtIndex(first_slot_address, slot_index, slot_size);
+        const node_ptr: *FreeList.Node = @alignCast(@ptrCast(slot));
         node_ptr.* = .{ .next = null, .data = {} };
 
         self.alloc_free_list.prepend(node_ptr);
@@ -128,6 +131,21 @@ pub fn migrateFreeList(self: *Page) void {
     log.debug("finished migrating free list", .{});
 }
 
+fn firstSlotAddress(page_address: usize, slot_size: usize) usize {
+    return std.mem.alignForwardLog2(page_address, @ctz(slot_size));
+}
+
+fn slotAtIndex(first_slot_address: usize, index: usize, slot_size: usize) Slot {
+    const slot_address = first_slot_address + index * slot_size;
+    const slot_ptr: [*]align(constants.min_slot_alignment) u8 = @ptrFromInt(slot_address);
+    return slot_ptr[0..slot_size];
+}
+
+fn slotIndexOfPtr(first_slot_address: usize, slot_size: usize, ptr: *anyopaque) usize {
+    const bytes_address = @intFromPtr(ptr);
+    return (bytes_address - first_slot_address) / slot_size;
+}
+
 /// returns the `Slot` containing `bytes.ptr`
 pub fn containingSlot(self: *const Page, ptr: *anyopaque) Slot {
     const segment = Segment.ofPtr(self);
@@ -137,12 +155,9 @@ pub fn containingSlot(self: *const Page, ptr: *anyopaque) Slot {
 /// returns the `Slot` containing `bytes.ptr`
 pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyopaque) Slot {
     const page_slice = segment.pageSlice(segment.pageIndex(ptr));
-    const page_address = @intFromPtr(page_slice.ptr);
-    const bytes_address = @intFromPtr(ptr);
-    const index = (bytes_address - page_address) / self.slot_size;
-    const slot_address = page_address + index * self.slot_size;
-    const slot_ptr: [*]align(constants.min_slot_alignment) u8 = @ptrFromInt(slot_address);
-    return slot_ptr[0..self.slot_size];
+    const first_slot_address = firstSlotAddress(@intFromPtr(page_slice.ptr), self.slot_size);
+    const index = slotIndexOfPtr(first_slot_address, self.slot_size, ptr);
+    return slotAtIndex(first_slot_address, index, self.slot_size);
 }
 
 pub fn freeLocalAligned(self: *Page, slot: Slot) void {
