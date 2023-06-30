@@ -258,34 +258,41 @@ fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     _ = self.deallocate(buf, log2_align, ret_addr);
 }
 
+fn getSegmentWithEmptySlot(self: *Heap, slot_size: u32) ?Segment.Ptr {
+    var segment_iter = self.segments;
+    while (segment_iter) |node| : (segment_iter = node.next) {
+        const page_size = @as(usize, 1) << node.page_shift;
+        const segment_max_slot_size = page_size / constants.min_slots_per_page;
+        if (node.init_set.count() < node.page_count and segment_max_slot_size >= slot_size) {
+            return node;
+        }
+    }
+    return null;
+}
+
+fn initNewSegmentForSlotSize(self: *Heap, slot_size: u32) !Segment.Ptr {
+    const page_size = Segment.pageSize(slot_size);
+    const segment = Segment.init(self, page_size) orelse
+        return error.OutOfMemory;
+    if (self.segments) |orig_head| {
+        assert.withMessage(@src(), orig_head.prev == null, "segment list head is currupt");
+        orig_head.prev = segment;
+    }
+    log.debug("initialised new segment {*} with {s} pages", .{ segment, @tagName(page_size) });
+    segment.next = self.segments;
+    self.segments = segment;
+    return segment;
+}
+
 /// asserts that `slot_size <= max_slot_size_large_page`
 fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
     const slot_size = indexToSize(class);
 
     assert.withMessage(@src(), slot_size <= constants.max_slot_size_large_page, "slot size of requested class too large");
 
-    const segment: Segment.Ptr = segment: {
-        var segment_iter = self.segments;
-        while (segment_iter) |node| : (segment_iter = node.next) {
-            const page_size = @as(usize, 1) << node.page_shift;
-            const segment_max_slot_size = page_size / constants.min_slots_per_page;
-            if (node.init_set.count() < node.page_count and segment_max_slot_size >= slot_size) {
-                break :segment node;
-            }
-        } else {
-            const page_size = Segment.pageSize(slot_size);
-            const segment = Segment.init(self, page_size) orelse
-                return error.OutOfMemory;
-            if (self.segments) |orig_head| {
-                assert.withMessage(@src(), orig_head.prev == null, "segment list head is currupt");
-                orig_head.prev = segment;
-            }
-            log.debug("initialised new segment: {*}", .{segment});
-            segment.next = self.segments;
-            self.segments = segment;
-            break :segment segment;
-        }
-    };
+    const segment: Segment.Ptr = self.getSegmentWithEmptySlot(slot_size) orelse
+        try self.initNewSegmentForSlotSize(slot_size);
+
     const index = index: {
         var iter = segment.init_set.iterator(.{ .kind = .unset });
         break :index iter.next().?; // segment is guaranteed to have an uninitialised page
