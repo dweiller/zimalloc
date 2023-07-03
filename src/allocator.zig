@@ -229,7 +229,7 @@ pub fn Allocator(comptime config: Config) type {
                     @intFromPtr(allocation.ptr),
                     .{
                         .size = len,
-                        .is_huge = len > constants.max_slot_size_large_page,
+                        .is_huge = allocation.is_huge,
                     },
                 );
             }
