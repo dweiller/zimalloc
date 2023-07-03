@@ -86,7 +86,7 @@ pub fn putAssumeCapacity(self: *HugeAllocTable, ptr: *anyopaque, size: usize) vo
     return self.putAssumeCapacityRaw(ptr, size);
 }
 
-pub fn putAssumeCapacityRaw(self: *HugeAllocTable, ptr: *anyopaque, size: usize) !void {
+pub fn putAssumeCapacityRaw(self: *HugeAllocTable, ptr: *anyopaque, size: usize) void {
     return self.hash_map.putAssumeCapacity(@intFromPtr(ptr), size);
 }
 
