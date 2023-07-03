@@ -51,6 +51,7 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         pub fn deinit(self: *Self) void {
+            self.thread_heaps_lock.lock();
             var heap_iter = self.thread_heaps.iterator(0);
             while (heap_iter.next()) |heap_data| {
                 if (config.track_allocations) {
@@ -84,8 +85,10 @@ pub fn Allocator(comptime config: Config) type {
             return new_ptr;
         }
 
-        fn ownsHeap(self: *const Self, heap: *const Heap) bool {
+        fn ownsHeap(self: *Self, heap: *const Heap) bool {
             var index: usize = 0;
+            self.thread_heaps_lock.lockShared();
+            defer self.thread_heaps_lock.unlockShared();
             var iter = self.thread_heaps.constIterator(0);
             while (iter.next()) |heap_data| : (index += 1) {
                 if (&heap_data.heap == heap) return true;
@@ -103,6 +106,8 @@ pub fn Allocator(comptime config: Config) type {
                 // this check also covers buf.len > constants.max_slot_size_large_page
 
                 if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
+                    self.thread_heaps_lock.lockShared();
+                    defer self.thread_heaps_lock.unlockShared();
                     var heap_iter = self.thread_heaps.iterator(0);
                     while (heap_iter.next()) |heap_data| {
                         if (heap_data.heap.huge_allocations.contains(ptr)) {
@@ -247,11 +252,10 @@ pub fn Allocator(comptime config: Config) type {
             // TODO: check this is valid on windows
             // this check also covers buf.len > constants.max_slot_size_large_page
             if (std.mem.isAligned(@intFromPtr(buf.ptr), std.mem.page_size)) {
+                self.thread_heaps_lock.lockShared();
+                defer self.thread_heaps_lock.unlockShared();
                 var heap_iter = self.thread_heaps.iterator(0);
                 while (heap_iter.next()) |heap_data| {
-                    if (!lock_held) heap_data.heap.huge_allocations.lock();
-                    defer if (!lock_held) heap_data.heap.huge_allocations.unlock();
-
                     if (heap_data.heap.huge_allocations.containsRaw(buf.ptr)) {
                         if (config.track_allocations) {
                             heap_data.metadata.mutex.lock();
@@ -284,6 +288,7 @@ pub fn Allocator(comptime config: Config) type {
 
         /// if tracking allocations, caller must hold metadata lock of `heap`
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
+            log.debug("freeing non-huge allocation", .{});
             const segment = Segment.ofPtr(buf.ptr);
 
             if (config.safety_checks) if (!self.ownsHeap(heap)) {
@@ -304,15 +309,16 @@ pub fn Allocator(comptime config: Config) type {
             }
         }
 
-        /// if tracking allocations, caller must hold metadata lock of `heap` and an
-        /// exclusive lock for the `heap.huge_allocations`
+        /// if tracking allocations, caller must hold metadata lock of `heap`
         pub fn freeHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
             if (config.safety_checks) if (!self.ownsHeap(heap)) {
                 log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
                 return;
             };
 
+            heap.huge_allocations.lock();
             const size = heap.deallocateHuge(buf, log2_align, ret_addr);
+            heap.huge_allocations.unlock();
 
             if (config.memory_limit) |_| {
                 self.stats.total_allocated_memory -= size;
@@ -342,6 +348,8 @@ pub fn Allocator(comptime config: Config) type {
 
         pub fn usableSize(self: *Self, ptr: *anyopaque, comptime lock_held: bool) ?usize {
             if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
+                self.thread_heaps_lock.lockShared();
+                defer self.thread_heaps_lock.unlockShared();
                 var heap_iter = self.thread_heaps.iterator(0);
                 while (heap_iter.next()) |heap_data| {
                     const size_opt = if (!lock_held)
