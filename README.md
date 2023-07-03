@@ -70,5 +70,5 @@ zig build libzimalloc -Doptimize=ReleaseSafe
   - There are likely still data races present in multi-threaded workloads.
   - The main suite of tests currently used is `https://github.com/daanx/mimalloc-bench`
     which are run using `LD_PRELOAD`. Tests that have been observed to fail are `redis`, `lua`,
-  `rptest`, `larson`, `larson-sized`, `mleak`, `rbstress`—some only fail intermitently.
+  `rptest`, `rbstress`—some only fail intermitently.
   - No attempt has been made to make the allocator signal-safe.
