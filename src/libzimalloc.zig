@@ -75,7 +75,7 @@ export fn free(ptr_opt: ?*anyopaque) void {
         @memset(slice, undefined);
 
         if (alloc.is_huge) {
-            allocator_instance.freeHugeFromHeap(&heap_data.heap, slice, 0, @returnAddress());
+            allocator_instance.freeHugeFromHeap(&heap_data.heap, slice, 0, @returnAddress(), false);
             return;
         }
 

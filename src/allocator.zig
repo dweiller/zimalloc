@@ -256,15 +256,17 @@ pub fn Allocator(comptime config: Config) type {
                 defer self.thread_heaps_lock.unlockShared();
                 var heap_iter = self.thread_heaps.iterator(0);
                 while (heap_iter.next()) |heap_data| {
+                    heap_data.heap.huge_allocations.lock();
+                    defer heap_data.heap.huge_allocations.unlock();
                     if (heap_data.heap.huge_allocations.containsRaw(buf.ptr)) {
                         if (config.track_allocations) {
-                            heap_data.metadata.mutex.lock();
-                            defer heap_data.metadata.mutex.unlock();
-                            self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
+                            if (!lock_held) heap_data.metadata.mutex.lock();
+                            defer if (!lock_held) heap_data.metadata.mutex.unlock();
+                            self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr, true);
                             return;
                         }
 
-                        self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr);
+                        self.freeHugeFromHeap(&heap_data.heap, buf, log2_align, ret_addr, true);
                         return;
                     }
                 }
@@ -310,15 +312,22 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         /// if tracking allocations, caller must hold metadata lock of `heap`
-        pub fn freeHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
+        pub fn freeHugeFromHeap(
+            self: *Self,
+            heap: *Heap,
+            buf: []u8,
+            log2_align: u8,
+            ret_addr: usize,
+            comptime lock_held: bool,
+        ) void {
             if (config.safety_checks) if (!self.ownsHeap(heap)) {
                 log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
                 return;
             };
 
-            heap.huge_allocations.lock();
+            if (!lock_held) heap.huge_allocations.lock();
             const size = heap.deallocateHuge(buf, log2_align, ret_addr);
-            heap.huge_allocations.unlock();
+            if (!lock_held) heap.huge_allocations.unlock();
 
             if (config.memory_limit) |_| {
                 self.stats.total_allocated_memory -= size;
