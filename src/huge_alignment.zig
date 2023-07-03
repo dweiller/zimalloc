@@ -46,6 +46,21 @@ pub fn deallocate(buf: []align(std.mem.page_size) const u8) void {
     std.os.munmap(buf.ptr[0..aligned_len]);
 }
 
+pub fn resizeAllocation(buf: []align(std.mem.page_size) u8, new_len: usize) bool {
+    const old_aligned_len = std.mem.alignForward(usize, buf.len, std.mem.page_size);
+    const new_aligned_len = std.mem.alignForward(usize, new_len, std.mem.page_size);
+
+    if (new_aligned_len == old_aligned_len) {
+        return true;
+    } else if (new_aligned_len < old_aligned_len) {
+        const trailing_ptr: [*]align(std.mem.page_size) u8 = @alignCast(buf.ptr + new_aligned_len);
+        std.os.munmap(trailing_ptr[0 .. old_aligned_len - new_aligned_len]);
+        return true;
+    } else {
+        return false;
+    }
+}
+
 const std = @import("std");
 
 const assert = @import("assert.zig");

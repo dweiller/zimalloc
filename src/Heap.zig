@@ -179,8 +179,19 @@ pub fn resizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret
         .{ buf.ptr, buf.len, log2_align, new_len },
     );
 
-    if (self.huge_allocations.contains(buf.ptr)) {
-        return std.heap.page_allocator.rawResize(buf, log2_align, new_len, ret_addr);
+    if (self.huge_allocations.get(buf.ptr)) |size| {
+        const slice: []align(std.mem.page_size) u8 = @alignCast(buf.ptr[0..size]);
+        const can_resize = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
+            huge_alignment.resizeAllocation(slice, new_len)
+        else
+            std.heap.page_allocator.rawResize(slice, log2_align, new_len, ret_addr);
+        if (can_resize) {
+            const new_aligned_len = std.mem.alignForward(usize, new_len, std.mem.page_size);
+            self.huge_allocations.putAssumeCapacity(buf.ptr, new_aligned_len);
+            return true;
+        } else {
+            return false;
+        }
     }
 
     const segment = Segment.ofPtr(buf.ptr);
@@ -227,7 +238,10 @@ pub fn deallocateInSegment(
 /// The caller must lock `self.huge_allocations`.
 pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
     log.debug("deallocate huge allocation {*}", .{buf.ptr});
-    std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
+    if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
+        huge_alignment.deallocate(@alignCast(buf))
+    else
+        std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
 
     assert.withMessage(@src(), self.huge_allocations.removeRaw(buf.ptr), "huge allocation table corrupt with deallocating");
     return std.mem.alignForward(usize, buf.len, std.mem.page_size);
