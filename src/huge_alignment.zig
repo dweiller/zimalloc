@@ -30,7 +30,7 @@ pub fn allocateOptions(
 }
 
 /// Makes a readable, writeable, anonymous private mapping with size rounded up to
-/// std.mem.page_size. Can be freed with std.os.unmap
+/// a multiple of `std.mem.page_size`. Should be freed with `deallocate()`.
 pub fn allocate(size: usize, alignment: usize) ?[]align(std.mem.page_size) u8 {
     return allocateOptions(
         size,
@@ -38,6 +38,12 @@ pub fn allocate(size: usize, alignment: usize) ?[]align(std.mem.page_size) u8 {
         std.os.PROT.READ | std.os.PROT.WRITE,
         std.os.MAP.PRIVATE | std.os.MAP.ANONYMOUS,
     );
+}
+
+/// Rounds `buf.len` up to a multiple of `std.mem.page_size`.
+pub fn deallocate(buf: []align(std.mem.page_size) const u8) void {
+    const aligned_len = std.mem.alignForward(usize, buf.len, std.mem.page_size);
+    std.os.munmap(buf.ptr[0..aligned_len]);
 }
 
 const std = @import("std");

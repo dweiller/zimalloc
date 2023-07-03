@@ -93,7 +93,7 @@ fn allocateSegment() ?*align(segment_alignment) [segment_size]u8 {
 
 fn deallocateSegment(self: Ptr) void {
     const ptr: *align(segment_alignment) [segment_size]u8 = @ptrCast(self);
-    std.os.munmap(ptr);
+    huge_alignment.deallocate(ptr);
 }
 
 const PageBitSet = std.StaticBitSet(small_page_count);
