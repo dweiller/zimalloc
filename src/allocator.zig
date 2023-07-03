@@ -282,7 +282,7 @@ pub fn Allocator(comptime config: Config) type {
             self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
         }
 
-        /// if tracking allocations, caller must hold metadata lock of heap owning `buf`
+        /// if tracking allocations, caller must hold metadata lock of `heap`
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
             const segment = Segment.ofPtr(buf.ptr);
 
