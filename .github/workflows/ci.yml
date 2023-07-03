@@ -128,11 +128,22 @@ jobs:
       - name: Run xmalloc-test
         run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/xmalloc-test -w ${{ steps.bench-setup.outputs.procs }} -t 5 -s 64
 
+      - name: Run larson
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/larson 5 8 1000 5000 100 4141 ${{ steps.bench-setup.outputs.procs }}
+
+      - name: Run larson-sized
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/larson-sized 5 8 1000 5000 100 4141 ${{ steps.bench-setup.outputs.procs }}
+
       - name: Run malloc-large
         run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/malloc-large
 
       - name: Run espresso
         run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/espresso bench/espresso/largest.espresso
+
+      - name: Run mleak
+        run: |
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/mleak 5
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/mleak 50
 
       - name: Run alloc-test
         run: |
