@@ -230,8 +230,6 @@ pub fn Allocator(comptime config: Config) type {
                 // TODO: this shouldn't be possible, heap.allocate() should respect
                 //       the limit, and this if statement can be replaced with an assert
                 if (self.stats.total_allocated_memory > limit) {
-                    heap.huge_allocations.lock();
-                    defer heap.huge_allocations.unlock();
                     _ = heap.deallocate(allocation.ptr[0..len], log2_align, ret_addr);
                     self.stats.total_allocated_memory -= allocation.backing_size;
                     return null;
@@ -325,9 +323,7 @@ pub fn Allocator(comptime config: Config) type {
                 return;
             };
 
-            heap.huge_allocations.lock();
             const size = heap.deallocateHuge(buf, log2_align, ret_addr);
-            heap.huge_allocations.unlock();
 
             if (config.memory_limit) |_| {
                 self.stats.total_allocated_memory -= size;
