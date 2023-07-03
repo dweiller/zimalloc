@@ -39,7 +39,6 @@ pub fn Allocator(comptime config: Config) type {
 
         const ThreadHeapData = struct {
             heap: Heap,
-            huge_allocations: HugeAllocTable = .{},
             metadata: Metadata = if (config.track_allocations) .{} else {},
             owner: *Self,
         };
