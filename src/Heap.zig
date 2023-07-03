@@ -41,6 +41,7 @@ pub fn allocator(self: *Heap) std.mem.Allocator {
 pub const Alloc = struct {
     ptr: [*]align(constants.min_slot_alignment) u8,
     backing_size: usize,
+    is_huge: bool,
 };
 
 pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
@@ -65,6 +66,7 @@ pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?A
     return .{
         .ptr = @alignCast(ptr),
         .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
+        .is_huge = true,
     };
 }
 
@@ -86,6 +88,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
         return .{
             .ptr = @ptrFromInt(aligned_address),
             .backing_size = buf.len,
+            .is_huge = false,
         };
     }
 
@@ -99,6 +102,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
         return .{
             .ptr = @ptrFromInt(aligned_address),
             .backing_size = buf.len,
+            .is_huge = false,
         };
     }
 
@@ -139,6 +143,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
     return .{
         .ptr = @ptrFromInt(aligned_address),
         .backing_size = slot.len,
+        .is_huge = false,
     };
 }
 
