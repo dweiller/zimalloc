@@ -11,7 +11,7 @@ pub fn Allocator(comptime config: Config) type {
     return struct {
         backing_allocator: std.mem.Allocator = std.heap.page_allocator,
         thread_heaps: std.SegmentedList(ThreadHeapData, config.thread_data_prealloc) = .{},
-        thread_heaps_sema: std.atomic.Atomic(u32) = .{ .value = 1 },
+        thread_heaps_lock: std.Thread.RwLock = .{},
         // TODO: atomic access
         stats: Stats = if (config.memory_limit != null) .{} else {},
 
@@ -70,11 +70,9 @@ pub fn Allocator(comptime config: Config) type {
             const thread_id = std.Thread.getCurrentId();
             log.debug("initialising heap for thread {d}", .{thread_id});
 
-            log.debug("locking sema", .{});
-            while (self.thread_heaps_sema.tryCompareAndSwap(1, 0, .Acquire, .Monotonic)) |v| {
-                log.debug("locking sema, value was {d}", .{v});
-            }
-            defer self.thread_heaps_sema.store(1, .Release);
+            log.debugVerbose("obtaining heap lock", .{});
+            self.thread_heaps_lock.lock();
+            defer self.thread_heaps_lock.unlock();
 
             const new_ptr = self.thread_heaps.addOne(self.backing_allocator) catch return null;
 
@@ -170,26 +168,17 @@ pub fn Allocator(comptime config: Config) type {
 
             const thread_id = std.Thread.getCurrentId();
 
-            while (true) {
-                log.debug("checking sema is non-zero", .{});
-                const v = self.thread_heaps_sema.tryCompareAndSwap(0, 0, .Acquire, .Monotonic) orelse continue;
-                log.debug("sema was {d}", .{v});
-                if (self.thread_heaps_sema.tryCompareAndSwap(v, v + 1, .Acquire, .Monotonic) == null) {
-                    log.debug("incremented sema", .{});
-                    break;
-                }
-            }
+            log.debugVerbose("obtaining shared thread heaps lock", .{});
+            self.thread_heaps_lock.lockShared();
 
             var iter = self.thread_heaps.iterator(0);
             while (iter.next()) |heap_data| {
                 if (heap_data.heap.thread_id == thread_id) {
-                    // sema value is guaranteed to be > 1
-                    _ = self.thread_heaps_sema.fetchSub(1, .Release);
+                    self.thread_heaps_lock.unlockShared();
                     return self.allocInHeap(heap_data, len, log2_align, ret_addr, lock_held);
                 }
             } else {
-                // sema value is guaranteed to be > 1
-                _ = self.thread_heaps_sema.fetchSub(1, .Release);
+                self.thread_heaps_lock.unlockShared();
                 const heap_data = self.initHeapForThread() orelse return null;
                 return self.allocInHeap(heap_data, len, log2_align, ret_addr, lock_held);
             }
