@@ -283,7 +283,7 @@ pub fn Allocator(comptime config: Config) type {
             self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
         }
 
-        /// if tracking allocations, caller must hold metadata lock of heap owning `buf`
+        /// if tracking allocations, caller must hold metadata lock of `heap`
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
             const segment = Segment.ofPtr(buf.ptr);
 
@@ -305,7 +305,8 @@ pub fn Allocator(comptime config: Config) type {
             }
         }
 
-        /// if tracking allocations, caller must hold metadata lock of heap owning `buf`
+        /// if tracking allocations, caller must hold metadata lock of `heap` and an
+        /// exclusive lock for the `heap.huge_allocations`
         pub fn freeHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
             if (config.safety_checks) if (!self.ownsHeap(heap)) {
                 log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
@@ -344,10 +345,12 @@ pub fn Allocator(comptime config: Config) type {
             if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
                 var heap_iter = self.thread_heaps.iterator(0);
                 while (heap_iter.next()) |heap_data| {
-                    if (!lock_held) heap_data.heap.huge_allocations.lock();
-                    defer if (!lock_held) heap_data.heap.huge_allocations.unlock();
+                    const size_opt = if (!lock_held)
+                        heap_data.heap.huge_allocations.get(ptr)
+                    else
+                        heap_data.heap.huge_allocations.getRaw(ptr);
 
-                    if (heap_data.heap.huge_allocations.getRaw(ptr)) |size| {
+                    if (size_opt) |size| {
                         // WARNING: this depends on the implementation of std.heap.PageAllocator
                         // aligning allocated lengths to the page size
                         return std.mem.alignForward(usize, size, std.mem.page_size);
