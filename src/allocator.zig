@@ -4,7 +4,7 @@ pub const Config = struct {
     thread_data_prealloc: usize = 128,
     thread_safe: bool = !builtin.single_threaded,
     track_allocations: bool = false, // TODO: use this to assert usage/invariants
-    safety_checks: bool = true,
+    safety_checks: bool = std.debug.runtime_safety,
 };
 
 pub fn Allocator(comptime config: Config) type {
