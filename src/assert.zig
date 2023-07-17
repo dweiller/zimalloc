@@ -7,7 +7,7 @@ pub fn withMessage(src_loc: std.builtin.SourceLocation, ok: bool, message: []con
             src_loc.fn_name,
             message,
         });
-        std.os.exit(1);
+        unreachable;
     }
 }
 
