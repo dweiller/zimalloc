@@ -1,5 +1,4 @@
 pub const Config = struct {
-    // TODO: make the number of allowed threads dynamic
     memory_limit: ?usize = null,
     thread_data_prealloc: usize = 128,
     thread_safe: bool = !builtin.single_threaded,
