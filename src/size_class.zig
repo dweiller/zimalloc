@@ -17,7 +17,7 @@ pub const branchless = struct {
         const base = (c + 1) * @sizeOf(usize);
         const size_shift: ShiftInt = @intCast(a / step_divisions);
         const i = a % step_divisions;
-        return @intCast(base + i * @sizeOf(usize) * 1 << size_shift);
+        return @intCast(base + i * @sizeOf(usize) << size_shift);
     }
 
     /// asserts `len > 0`
@@ -130,7 +130,7 @@ pub const branching = struct {
             const size_shift: ShiftInt = @intCast(s / step_divs);
             const i = s % step_divs;
 
-            return @intCast(last_special_size + i * step_size_base * 1 << size_shift);
+            return @intCast(last_special_size + i * step_size_base << size_shift);
         }
     }
 
