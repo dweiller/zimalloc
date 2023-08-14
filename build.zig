@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
     libzimalloc.addModule("build_options", zimalloc_options);
     libzimalloc.force_pic = true;
 
-    const libzimalloc_install = b.addInstallArtifact(libzimalloc);
+    const libzimalloc_install = b.addInstallArtifact(libzimalloc, .{});
     b.getInstallStep().dependOn(&libzimalloc_install.step);
     libzimalloc_step.dependOn(&libzimalloc_install.step);
 
@@ -89,9 +89,10 @@ pub fn build(b: *std.Build) void {
         });
         test_exe.addModule("zimalloc", zimalloc);
         test_exe.addOptions("build_options", standalone_options);
-        test_exe.override_dest_dir = .{ .custom = "test" };
 
-        const install_step = b.addInstallArtifact(test_exe);
+        const install_step = b.addInstallArtifact(test_exe, .{
+            .dest_dir = .{ .override = .{ .custom = "test" } },
+        });
         standalone_test_build_step.dependOn(&install_step.step);
 
         const run_step = b.addRunArtifact(test_exe);
