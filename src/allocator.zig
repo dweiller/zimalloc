@@ -184,7 +184,7 @@ pub fn Allocator(comptime config: Config) type {
             }
         }
 
-        inline fn allocInHeap(
+        fn allocInHeap(
             self: *Self,
             heap_data: *ThreadHeapData,
             len: usize,
