@@ -39,7 +39,6 @@ pub fn Allocator(comptime config: Config) type {
         const ThreadHeapData = struct {
             heap: Heap,
             metadata: Metadata = if (config.track_allocations) .{} else {},
-            owner: *Self,
         };
 
         pub fn init(backing_allocator: std.mem.Allocator) error{OutOfMemory}!Self {
@@ -77,7 +76,6 @@ pub fn Allocator(comptime config: Config) type {
 
             new_ptr.* = .{
                 .heap = Heap.init(),
-                .owner = self,
             };
 
             log.debug("heap initialised: {*}", .{new_ptr});
@@ -136,9 +134,8 @@ pub fn Allocator(comptime config: Config) type {
                 return heap_data;
             }
 
-            fn heapMetadataUnsafe(self: *Self, heap: *Heap) *Metadata {
+            fn heapMetadataUnsafe(heap: *Heap) *Metadata {
                 const thread_heap_data = @fieldParentPtr(ThreadHeapData, "heap", heap);
-                assert.withMessage(@src(), self == thread_heap_data.owner, "heap not owned by allocator");
                 return &thread_heap_data.metadata;
             }
         } else struct {};
@@ -276,7 +273,7 @@ pub fn Allocator(comptime config: Config) type {
             const heap = segment.heap;
 
             if (config.track_allocations) {
-                const metadata = self.heapMetadataUnsafe(heap);
+                const metadata = Self.heapMetadataUnsafe(heap);
 
                 if (!lock_held) metadata.mutex.lock();
                 defer if (!lock_held) metadata.mutex.unlock();
@@ -298,7 +295,7 @@ pub fn Allocator(comptime config: Config) type {
             };
 
             if (config.track_allocations) {
-                const metadata = self.heapMetadataUnsafe(heap);
+                const metadata = Self.heapMetadataUnsafe(heap);
                 assert.withMessage(@src(), metadata.map.remove(@intFromPtr(buf.ptr)), "allocation metadata is missing");
             }
 
@@ -333,7 +330,7 @@ pub fn Allocator(comptime config: Config) type {
             }
 
             if (config.track_allocations) {
-                const metadata = self.heapMetadataUnsafe(heap);
+                const metadata = Self.heapMetadataUnsafe(heap);
                 assert.withMessage(@src(), metadata.map.remove(@intFromPtr(buf.ptr)), "huge allocation metadata is missing");
             }
         }
