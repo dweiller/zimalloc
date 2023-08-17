@@ -424,5 +424,4 @@ const constants = @import("constants.zig");
 const log = @import("log.zig");
 
 const Heap = @import("Heap.zig");
-const HugeAllocTable = @import("HugeAllocTable.zig");
 const Segment = @import("Segment.zig");
