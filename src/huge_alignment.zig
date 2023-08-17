@@ -1,6 +1,6 @@
-/// The `size` is  rounded up to a multiple of `std.mem.page_size`.
+/// The `size` is rounded up to a multiple of `std.mem.page_size`.
 /// Can be freed with std.os.unmap
-pub fn allocateOptions(
+fn allocateOptions(
     size: usize,
     alignment: usize,
     prot: u32,
