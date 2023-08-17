@@ -60,7 +60,17 @@ pub fn deinit(self: *Page) !void {
     segment.init_set.unset(page_index);
 
     const page_bytes = segment.pageSlice(page_index);
-    try std.posix.madvise(page_bytes.ptr, page_bytes.len, std.posix.MADV.DONTNEED);
+    switch (@import("builtin").os.tag) {
+        .linux => try std.posix.madvise(page_bytes.ptr, page_bytes.len, std.posix.MADV.DONTNEED),
+        // TODO: test this windows impl, presumably it's broken
+        .windows => _ = try std.os.windows.VirtualAlloc(
+            page_bytes.ptr,
+            page_bytes.len,
+            std.os.windows.MEM_RESET,
+            std.os.windows.PAGE_NOACCESS,
+        ),
+        else => |tag| @compileError(@tagName(tag) ++ " is not supported yet"),
+    }
 }
 
 pub fn getPtrInFreeSlot(self: *const Page) *align(constants.min_slot_alignment) anyopaque {
