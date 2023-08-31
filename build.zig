@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
     const panic_on_invalid = b.option(
         bool,
         "panic",
-        "Panic on invalid calls to free and realloc (default: false)",
+        "Panic on invalid calls to free and realloc in libzimalloc (default: false)",
     ) orelse false;
 
     const build_options = b.addOptions();
