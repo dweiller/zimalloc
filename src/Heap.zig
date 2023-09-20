@@ -47,7 +47,7 @@ pub const Alloc = struct {
 pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
     assert.withMessage(@src(), self.thread_id == std.Thread.getCurrentId(), "tried to allocate from wrong thread");
 
-    log.debug("allocate: huge allocation len={d}, log2_align={d}", .{ len, log2_align });
+    log.debug("allocateHuge: len={d}, log2_align={d}", .{ len, log2_align });
 
     self.huge_allocations.lock();
     defer self.huge_allocations.unlock();
@@ -74,7 +74,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
     assert.withMessage(@src(), class < size_class_count, "requested size class is too big");
 
     log.debugVerbose(
-        "allocate: size class={d}, log2_align={d}",
+        "allocateSizeClass: size class={d}, log2_align={d}",
         .{ class, log2_align },
     );
 

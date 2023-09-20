@@ -158,6 +158,7 @@ pub fn Allocator(comptime config: Config) type {
             ret_addr: usize,
             comptime lock_held: bool,
         ) ?[*]align(constants.min_slot_alignment) u8 {
+            log.debugVerbose("allocate: len={d} log2_align={d}", .{ len, log2_align });
             if (config.memory_limit) |limit| {
                 assert.withMessage(@src(), self.stats.total_allocated_memory <= limit, "corrupt stats");
                 if (len + self.stats.total_allocated_memory > limit) {
@@ -245,6 +246,7 @@ pub fn Allocator(comptime config: Config) type {
             ret_addr: usize,
             comptime lock_held: bool,
         ) void {
+            log.debugVerbose("deallocate: buf=({*}, {d}) log2_align={d}", .{ buf.ptr, buf.len, log2_align });
             // TODO: check this is valid on windows
             // this check also covers buf.len > constants.max_slot_size_large_page
             if (std.mem.isAligned(@intFromPtr(buf.ptr), std.mem.page_size)) {
