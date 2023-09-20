@@ -398,7 +398,7 @@ pub fn Allocator(comptime config: Config) type {
                 return false;
             };
 
-            const can_resize = owning_heap.resizeInPlace(buf, log2_align, new_len, ret_addr);
+            const can_resize = owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
 
             // BUG: there is a bug for memory limiting here if `buf` is a huge allocation
             //      that gets shrunk to a lower os page count (see std.heap.PageAllocator.resize)

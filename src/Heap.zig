@@ -178,9 +178,9 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
     return null;
 }
 
-pub fn resizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
     log.debugVerbose(
-        "can resize: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
+        "canResizeInPlace: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
         .{ buf.ptr, buf.len, log2_align, new_len },
     );
 
@@ -274,7 +274,7 @@ fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
 
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
     const self: *@This() = @ptrCast(@alignCast(ctx));
-    return self.resizeInPlace(buf, log2_align, new_len, ret_addr);
+    return self.canResizeInPlace(buf, log2_align, new_len, ret_addr);
 }
 
 fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
