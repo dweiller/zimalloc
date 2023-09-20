@@ -170,12 +170,7 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc
 
     const class = sizeClass(slot_size_min);
 
-    if (self.allocateSizeClass(class, log2_align)) |allocation| {
-        @memset(allocation.ptr[0..indexToSize(class)], undefined);
-        return allocation;
-    }
-
-    return null;
+    return self.allocateSizeClass(class, log2_align);
 }
 
 pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
@@ -457,6 +452,23 @@ test "slot alignment" {
             return error.BadSizeClass;
         };
         try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(allocation.ptr), log2_align));
+    }
+}
+
+test "allocate with larger alignment" {
+    var heap = Heap.init();
+    defer heap.deinit();
+
+    for (0..size_class_count) |class| {
+        const size = (3 * indexToSize(class)) / 2;
+        const slot_log2_align = @ctz(indexToSize(class));
+        const log2_align = slot_log2_align + 1;
+        const allocation = heap.allocate(size, log2_align, 0) orelse {
+            log.err("failed to allocate size class {d}", .{class});
+            return error.BadSizeClass;
+        };
+        const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(allocation.ptr)));
+        try std.testing.expect(@ctz(indexToSize(class)) <= actual_log2_align);
     }
 }
 
