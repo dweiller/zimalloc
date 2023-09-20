@@ -78,6 +78,7 @@ pub fn allocSlotFast(self: *Page) ?Slot {
     const node_ptr = self.alloc_free_list.popFirst() orelse return null;
     const casted_ptr: [*]align(constants.min_slot_alignment) u8 = @ptrCast(node_ptr);
     self.used_count += 1;
+    @memset(casted_ptr[0..self.slot_size], undefined);
     return @ptrCast(casted_ptr[0..self.slot_size]);
 }
 
