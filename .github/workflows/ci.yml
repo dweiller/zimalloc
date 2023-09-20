@@ -140,6 +140,9 @@ jobs:
       - name: Run espresso
         run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/espresso bench/espresso/largest.espresso
 
+      - name: Run rptest
+        run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/rptest ${{ steps.bench-setup.outputs.procs }} 0 1 2 500 1000 100 8 16000
+
       - name: Run mleak
         run: |
           LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/mleak 5
