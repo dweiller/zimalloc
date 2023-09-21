@@ -1,6 +1,4 @@
-var allocator_instance = zimalloc.Allocator(.{
-    .track_allocations = true,
-}){};
+var allocator_instance = zimalloc.Allocator(.{}){};
 const allocator = allocator_instance.allocator();
 
 export fn malloc(len: usize) ?*anyopaque {
@@ -11,19 +9,13 @@ export fn malloc(len: usize) ?*anyopaque {
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
     log.debug("realloc {?*} {d}", .{ ptr_opt, len });
     if (ptr_opt) |ptr| {
-        const heap_data = allocator_instance.getThreadData(ptr, true) catch {
+        const old_size = allocator_instance.usableSize(ptr) orelse {
             invalid("invalid realloc: {*} - no valid heap", .{ptr});
             return null;
         };
 
-        const alloc = heap_data.metadata.map.get(@intFromPtr(ptr)) orelse {
-            invalid("invalid resize: {*}", .{ptr});
-            return null;
-        };
-        heap_data.metadata.mutex.unlock();
-
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
-        const old_slice = bytes_ptr[0..alloc.size];
+        const old_slice = bytes_ptr[0..old_size];
 
         if (allocator.rawResize(old_slice, 0, len, @returnAddress())) {
             log.debug("keeping old pointer", .{});
@@ -36,7 +28,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         const copy_len = @min(len, old_slice.len);
         @memcpy(new_mem[0..copy_len], old_slice[0..copy_len]);
 
-        allocator_instance.deallocate(old_slice, 0, @returnAddress(), false);
+        allocator_instance.deallocate(old_slice, 0, @returnAddress());
 
         log.debug("reallocated pointer: {*}", .{new_mem});
         return new_mem;
@@ -47,29 +39,23 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
 export fn free(ptr_opt: ?*anyopaque) void {
     log.debug("free {?*}", .{ptr_opt});
     if (ptr_opt) |ptr| {
-        const heap_data = allocator_instance.getThreadData(ptr, true) catch {
+        const heap = allocator_instance.getThreadHeap(ptr) orelse {
             invalid("invalid free: {*} - no valid heap", .{ptr});
-            return;
-        };
-        defer heap_data.metadata.mutex.unlock();
-
-        const alloc = heap_data.metadata.map.get(@intFromPtr(ptr)) orelse {
-            invalid("invalid free: {*}", .{ptr});
             return;
         };
 
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
-        const slice = bytes_ptr[0..alloc.size];
-        if (slice.len == 0) return;
 
-        @memset(slice, undefined);
-
-        if (alloc.is_huge) {
-            allocator_instance.freeHugeFromHeap(&heap_data.heap, slice, 0, @returnAddress(), false);
-            return;
+        if (heap.huge_allocations.get(ptr)) |size| {
+            assert.withMessage(@src(), size != 0, "BUG: huge allocation size should be > 0");
+            const slice = bytes_ptr[0..size];
+            @memset(slice, undefined);
+            allocator_instance.freeHugeFromHeap(heap, slice, 0, @returnAddress(), false);
+        } else {
+            const segment = Segment.ofPtr(ptr);
+            // deallocateInSegment only uses the slice's ptr, and does not use the log2_align
+            heap.deallocateInSegment(segment, bytes_ptr[0..1], 0, @returnAddress());
         }
-
-        allocator_instance.freeNonHugeFromHeap(&heap_data.heap, slice, 0, @returnAddress());
     }
 }
 
@@ -123,19 +109,7 @@ export fn pvalloc(size: usize) ?*anyopaque {
 export fn malloc_usable_size(ptr_opt: ?*anyopaque) usize {
     log.debug("malloc_usable_size {?*}", .{ptr_opt});
     if (ptr_opt) |ptr| {
-        const heap_data = allocator_instance.getThreadData(ptr, true) catch {
-            invalid("invalid malloc_usable_size: {*} - no valid heap", .{ptr});
-            return 0;
-        };
-        defer heap_data.metadata.mutex.unlock();
-
-        const alloc = heap_data.metadata.map.get(@intFromPtr(ptr)) orelse {
-            invalid("invalid malloc_usable_size: {*}", .{ptr});
-            return 0;
-        };
-
-        if (alloc.is_huge) return heap_data.heap.huge_allocations.get(ptr) orelse 0;
-        return allocator_instance.usableSizeSegment(ptr) orelse 0;
+        return allocator_instance.usableSize(ptr) orelse 0;
     }
     return 0;
 }
@@ -160,7 +134,7 @@ fn allocateBytes(
     }
 
     const log2_align = std.math.log2_int(usize, alignment);
-    if (allocator_instance.allocate(byte_count, log2_align, ret_addr, false)) |ptr| {
+    if (allocator_instance.allocate(byte_count, log2_align, ret_addr)) |ptr| {
         @memset(ptr[0..byte_count], if (zero) 0 else undefined);
         log.debug("allocated {*}", .{ptr});
         return ptr;
