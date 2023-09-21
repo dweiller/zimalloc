@@ -246,12 +246,14 @@ pub fn Allocator(comptime config: Config) type {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self: *@This() = @ptrCast(@alignCast(ctx));
 
-            const segment = Segment.ofPtr(buf.ptr);
-            const owning_heap = segment.heap;
+            // TODO: this implementation does a bunch of duplicate work/locking of the
+            // huge_allocations map - make it more like free()
 
-            if (config.safety_checks) if (!self.ownsHeap(owning_heap)) {
-                log.err("invalid resize: {*} is not part of an owned heap", .{buf});
-                return false;
+            const owning_heap = self.getThreadHeap(buf.ptr) orelse {
+                if (config.safety_checks) {
+                    log.err("invalid resize: {*} is not part of an owned heap", .{buf});
+                    return false;
+                } else unreachable;
             };
 
             return owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
