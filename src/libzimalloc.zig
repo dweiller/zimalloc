@@ -3,16 +3,6 @@ var allocator_instance = zimalloc.Allocator(.{
 }){};
 const allocator = allocator_instance.allocator();
 
-const AllocData = struct {
-    size: usize,
-};
-
-var metadata = std.AutoHashMap(usize, AllocData){
-    .unmanaged = .{},
-    .allocator = std.heap.page_allocator,
-    .ctx = undefined, // safe becuase AutoHashMap context type is zero sized
-};
-
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});
     return allocateBytes(len, 1, @returnAddress(), false, false, true);
@@ -44,7 +34,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
             return null;
 
         const copy_len = @min(len, old_slice.len);
-        @memcpy(new_mem[0..copy_len], old_slice);
+        @memcpy(new_mem[0..copy_len], old_slice[0..copy_len]);
 
         allocator_instance.deallocate(old_slice, 0, @returnAddress(), false);
 
