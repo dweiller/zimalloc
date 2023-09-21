@@ -211,11 +211,12 @@ pub fn deallocateInSegment(
     buf: []u8,
     log2_align: u8,
     ret_addr: usize,
-) usize {
+) void {
+    _ = log2_align;
     _ = ret_addr;
     log.debugVerbose(
-        "deallocate in {*}: buf.ptr={*}, buf.len={d}, log2_align={d}",
-        .{ segment, buf.ptr, buf.len, log2_align },
+        "deallocate in {*}: buf.ptr={*}, buf.len={d}",
+        .{ segment, buf.ptr, buf.len },
     );
 
     const page_index = segment.pageIndex(buf.ptr);
@@ -230,13 +231,12 @@ pub fn deallocateInSegment(
         log.debugVerbose("moving slot {*} to other freelist on thread {d}", .{ slot.ptr, self.thread_id });
         page.freeOtherAligned(slot);
     }
-    return page.slot_size;
 }
 
 /// returns the backing size of the `buf`; behaviour is undefined if
 /// `self` does not own `buf` and it's not a large allocation
 /// The caller must lock `self.huge_allocations`.
-pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
+pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
     log.debug("deallocate huge allocation {*}", .{buf.ptr});
     if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
         huge_alignment.deallocate(@alignCast(buf))
@@ -244,12 +244,11 @@ pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) u
         std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
 
     assert.withMessage(@src(), self.huge_allocations.removeRaw(buf.ptr), "huge allocation table corrupt with deallocating");
-    return std.mem.alignForward(usize, buf.len, std.mem.page_size);
 }
 
 // returns the backing size of the `buf`; behaviour is undefined if
 // `self` does not own `buf.ptr`.
-pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize {
+pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
     {
         self.huge_allocations.lock();
         defer self.huge_allocations.unlock();
@@ -259,7 +258,7 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) usize
         }
     }
     const segment = Segment.ofPtr(buf.ptr);
-    return self.deallocateInSegment(segment, buf, log2_align, ret_addr);
+    self.deallocateInSegment(segment, buf, log2_align, ret_addr);
 }
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {

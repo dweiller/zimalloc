@@ -3,7 +3,7 @@ pub const Config = @import("allocator.zig").Config;
 pub const Heap = @import("Heap.zig");
 
 test {
-    _ = Allocator(.{ .track_allocations = true, .memory_limit = 4096 });
+    _ = Allocator(.{});
     _ = @import("Heap.zig");
     _ = @import("list.zig");
     _ = @import("Page.zig");
@@ -14,23 +14,19 @@ test {
 }
 
 const configs = configs: {
-    const memory_limit = [_]?usize{ null, 165536 };
-    const track_allocations = [_]bool{ false, true };
     const safety_checks = [_]bool{ false, true };
 
-    const config_count = memory_limit.len * track_allocations.len * safety_checks.len;
+    const config_count = safety_checks.len;
     var result: [config_count]Config = undefined;
 
     var index = 0;
 
-    for (memory_limit) |limit| for (track_allocations) |track| for (safety_checks) |safety| {
+    for (safety_checks) |safety| {
         result[index] = Config{
-            .memory_limit = limit,
-            .track_allocations = track,
             .safety_checks = safety,
         };
         index += 1;
-    };
+    }
     break :configs result;
 };
 
