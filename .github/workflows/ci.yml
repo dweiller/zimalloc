@@ -65,12 +65,12 @@ jobs:
       - name: Build benchmarks
         if: steps.cache-benchmarks.outputs.cache-hit != 'true'
         run: |
-          echo "::group::Install dos2unix"
+          echo "::group::Install dependencies"
           sudo apt-get update
           sudo apt-get install dos2unix
           echo "::endgroup::"
           echo "::group::Build"
-          ./build-bench-env.sh bench lean
+          ./build-bench-env.sh bench lean redis
           echo "::endgroup::"
 
       - name: Download libzimalloc artifact
@@ -83,9 +83,9 @@ jobs:
       - name: Setup benchmarks
         id: bench-setup
         run: |
-          echo "::group::Install ghostscript"
+          echo "::group::Install dependencies"
           sudo apt-get update
-          sudo apt-get install ghostscript
+          sudo apt-get install ghostscript ruby
           echo "::endgroup::"
           if command -v nproc > /dev/null; then
             procs=$(nproc)
@@ -98,6 +98,7 @@ jobs:
             echo "procsx2=16" >> "$GITHUB_OUTPUT"
           fi
           echo "ld_preload=${{ steps.download.outputs.download-path }}/zig-out-release-safe/lib/libzimalloc.so" >> "$GITHUB_OUTPUT"
+          echo "redis_version=$(grep -E version_redis= bench.sh | cut -d= -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Run mstress
         run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/mstress ${{ steps.bench-setup.outputs.procs }} 50 25
@@ -136,6 +137,34 @@ jobs:
 
       - name: Run malloc-large
         run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/malloc-large
+
+      - name: Run lua
+        run: |
+          pushd extern/lua
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" make
+          make clean
+          popd
+
+      - name: Run redis
+        run: |
+          redis_path=extern/redis-${{ steps.bench-setup.outputs.redis_version }}/src
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" $redis_path/redis-server &
+          sleep 1s
+          $redis_path/redis-cli flushall
+          sleep 1s
+          $redis_path/redis-benchmark -r 1000000 -n 100000 -q -P 16 lpush a 1 2 3 4 5 lrange a 1 5
+          sleep 1s
+          $redis_path/redis-cli flushall
+          sleep 1s
+          $redis_path/redis-cli shutdown
+          sleep 1s
+
+      - name: Run rbstress
+        run: |
+          LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" ruby bench/rbstress/stress_mem.rb 1
+          if test "${{ steps.bench-setup.outputs.procs }}" != "1"; then
+            LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" ruby bench/rbstress/stress_mem.rb ${{ steps.bench-setup.outputs.procs }}
+          fi
 
       - name: Run espresso
         run: LD_PRELOAD="${{ steps.bench-setup.outputs.ld_preload }}" out/bench/espresso bench/espresso/largest.espresso
