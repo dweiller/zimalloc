@@ -203,8 +203,7 @@ pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, 
     return @intFromPtr(buf.ptr) + new_len <= @intFromPtr(slot.ptr) + slot.len;
 }
 
-/// returns the backing size of the `buf`; behaviour is undefined if
-/// `self` and `segment` do not own `buf.ptr`.
+/// behaviour is undefined if `self` and `segment` do not own `buf.ptr`.
 pub fn deallocateInSegment(
     self: *Heap,
     segment: Segment.Ptr,
@@ -233,9 +232,8 @@ pub fn deallocateInSegment(
     }
 }
 
-/// returns the backing size of the `buf`; behaviour is undefined if
-/// `self` does not own `buf` and it's not a large allocation
-/// The caller must lock `self.huge_allocations`.
+/// behaviour is undefined if `self` does not own `buf` and it's not a large
+/// allocation. The caller must lock `self.huge_allocations`.
 pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
     log.debug("deallocate huge allocation {*}", .{buf.ptr});
     if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
