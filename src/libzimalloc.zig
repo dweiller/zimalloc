@@ -52,9 +52,7 @@ export fn free(ptr_opt: ?*anyopaque) void {
             @memset(slice, undefined);
             allocator_instance.freeHugeFromHeap(heap, slice, 0, @returnAddress(), false);
         } else {
-            const segment = Segment.ofPtr(ptr);
-            // deallocateInSegment only uses the slice's ptr, and does not use the log2_align
-            heap.deallocateInSegment(segment, bytes_ptr[0..1], 0, @returnAddress());
+            allocator_instance.freeNonHugeFromHeap(heap, bytes_ptr[0..1], 0, @returnAddress());
         }
     }
 }
