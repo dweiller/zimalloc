@@ -125,7 +125,7 @@ fn allocateBytes(
     if (byte_count == 0) return null;
 
     if (check_alignment) {
-        if (!set_errno) @compileError("check_alignment requries set_errno to be true");
+        if (!set_errno) @compileError("check_alignment requires set_errno to be true");
         if (!std.mem.isValidAlign(alignment)) {
             invalid("invalid alignment: {d}", .{alignment});
             setErrno(.INVAL);
