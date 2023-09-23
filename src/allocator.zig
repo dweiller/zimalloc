@@ -170,19 +170,19 @@ pub fn Allocator(comptime config: Config) type {
             const segment = Segment.ofPtr(buf.ptr);
             const heap = segment.heap;
 
-            self.freeNonHugeFromHeap(heap, buf, log2_align, ret_addr);
+            self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
         }
 
-        pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
+        pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
             log.debug("freeing non-huge allocation", .{});
-            const segment = Segment.ofPtr(buf.ptr);
+            const segment = Segment.ofPtr(ptr);
 
             if (config.safety_checks) if (!self.ownsHeap(heap)) {
-                log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
+                log.err("invalid free: {*} is not part of an owned heap", .{ptr});
                 return;
             };
 
-            heap.deallocateInSegment(segment, buf, log2_align, ret_addr);
+            heap.deallocateInSegment(segment, ptr, log2_align, ret_addr);
         }
 
         pub fn freeHugeFromHeap(

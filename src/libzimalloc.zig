@@ -52,7 +52,7 @@ export fn free(ptr_opt: ?*anyopaque) void {
             @memset(slice, undefined);
             allocator_instance.freeHugeFromHeap(heap, slice, 0, @returnAddress(), false);
         } else {
-            allocator_instance.freeNonHugeFromHeap(heap, bytes_ptr[0..1], 0, @returnAddress());
+            allocator_instance.freeNonHugeFromHeap(heap, bytes_ptr, 0, @returnAddress());
         }
     }
 }
