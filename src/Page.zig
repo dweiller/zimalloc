@@ -11,7 +11,7 @@ const Page = @This();
 pub const SlotCountInt = std.math.IntFittingRange(0, constants.small_page_size / @sizeOf(usize));
 
 pub const List = list.Circular(Page);
-pub const FreeList = list.Appendable(void);
+pub const FreeList = std.SinglyLinkedList(void);
 
 comptime {
     if (@sizeOf(FreeList.Node) > constants.min_slot_size) {
@@ -29,9 +29,9 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) v
     const capacity: u16 = @intCast((bytes.len - offset) / slot_size);
     assert.withMessage(@src(), capacity == bytes.len / slot_size, "capacity not correct");
     self.* = .{
-        .local_free_list = .{ .first = null, .last = undefined },
-        .alloc_free_list = .{ .first = null, .last = undefined },
-        .other_free_list = .{ .first = null, .last = undefined },
+        .local_free_list = .{ .first = null },
+        .alloc_free_list = .{ .first = null },
+        .other_free_list = .{ .first = null },
         .used_count = 0,
         .other_freed = 0,
         .capacity = capacity,
@@ -83,10 +83,9 @@ pub fn allocSlotFast(self: *Page) ?Slot {
 }
 
 pub fn migrateFreeList(self: *Page) void {
-    log.debug("migrating free list: local={?*}, other_free={?*}, other_free_last={*}", .{
+    log.debug("migrating free list: local={?*}, other_free={?*}", .{
         self.local_free_list.first,
         self.other_free_list.first,
-        self.other_free_list.last,
     });
 
     assert.withMessage(
@@ -95,40 +94,31 @@ pub fn migrateFreeList(self: *Page) void {
         "migrating free lists when alloc_free_list is not empty",
     );
 
-    var other_free_list_head = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
-
-    const other_free_list_last = self.other_free_list.last;
-
-    while (@cmpxchgWeak(
+    const other_free_list_head = @atomicRmw(
         ?*FreeList.Node,
         &self.other_free_list.first,
-        other_free_list_head,
+        .Xchg,
         null,
-        .Monotonic, // TODO: figure out correct atomic order
-        .Monotonic, // TODO: figure out correct atomic order
-    )) |head| {
-        other_free_list_head = head;
-    }
+        .Monotonic,
+    );
+
+    self.alloc_free_list.first = self.local_free_list.first;
+    self.local_free_list.first = null;
 
     if (other_free_list_head) |head| {
-        const count: SlotCountInt = count: {
-            var c: SlotCountInt = 1;
-            var node = head.next;
-            while (node) |n| : (node = n.next) c += 1;
-            break :count c;
-        };
-        log.debug("updating other_freed: {d}, other_last: {*}", .{ count, other_free_list_last });
+        var count: SlotCountInt = 0;
+        var node: ?*FreeList.Node = head;
+        while (node) |n| {
+            node = n.next; // an infinite loop occurs if this happends after prepend() below
+            count += 1;
+            self.alloc_free_list.prepend(n);
+        }
+        log.debug("updating other_freed: {d}", .{count});
         _ = @atomicRmw(SlotCountInt, &self.other_freed, .Sub, count, .AcqRel);
 
-        self.alloc_free_list = .{ .first = head, .last = other_free_list_last };
-        self.alloc_free_list.appendList(self.local_free_list);
-
         self.used_count -= count;
-    } else {
-        self.alloc_free_list = self.local_free_list;
     }
 
-    self.local_free_list.first = null;
     log.debug("finished migrating free list", .{});
 }
 
@@ -186,8 +176,6 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
         .Monotonic,
         .Monotonic,
     )) |old_value| node.next = old_value;
-
-    if (node.next == null) self.other_free_list.last = node;
 }
 
 const std = @import("std");
