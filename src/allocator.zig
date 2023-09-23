@@ -235,6 +235,17 @@ pub fn Allocator(comptime config: Config) type {
             return self.usableSizeInSegment(ptr);
         }
 
+        pub fn canResize(self: *Self, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+            const owning_heap = self.getThreadHeap(buf.ptr) orelse {
+                if (config.safety_checks) {
+                    log.err("invalid resize: {*} is not part of an owned heap", .{buf});
+                    return false;
+                } else unreachable;
+            };
+
+            return owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
+        }
+
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self: *@This() = @ptrCast(@alignCast(ctx));
@@ -246,17 +257,7 @@ pub fn Allocator(comptime config: Config) type {
             assert.withMessage(@src(), std.mem.isAligned(@intFromPtr(ctx), @alignOf(@This())), "ctx is not aligned");
             const self: *@This() = @ptrCast(@alignCast(ctx));
 
-            // TODO: this implementation does a bunch of duplicate work/locking of the
-            // huge_allocations map - make it more like free()
-
-            const owning_heap = self.getThreadHeap(buf.ptr) orelse {
-                if (config.safety_checks) {
-                    log.err("invalid resize: {*} is not part of an owned heap", .{buf});
-                    return false;
-                } else unreachable;
-            };
-
-            return owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
+            return self.canResize(buf, log2_align, new_len, ret_addr);
         }
 
         fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {

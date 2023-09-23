@@ -1,5 +1,4 @@
 var allocator_instance = zimalloc.Allocator(.{}){};
-const allocator = allocator_instance.allocator();
 
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});
@@ -17,7 +16,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
         const old_slice = bytes_ptr[0..old_size];
 
-        if (allocator.rawResize(old_slice, 0, len, @returnAddress())) {
+        if (allocator_instance.canResize(old_slice, 0, len, @returnAddress())) {
             log.debug("keeping old pointer", .{});
             return ptr;
         }
