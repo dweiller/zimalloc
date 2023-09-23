@@ -207,21 +207,18 @@ pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, 
 pub fn deallocateInSegment(
     self: *Heap,
     segment: Segment.Ptr,
-    buf: []u8,
+    ptr: [*]u8,
     log2_align: u8,
     ret_addr: usize,
 ) void {
     _ = log2_align;
     _ = ret_addr;
-    log.debugVerbose(
-        "deallocate in {*}: buf.ptr={*}, buf.len={d}",
-        .{ segment, buf.ptr, buf.len },
-    );
+    log.debugVerbose("deallocate in {*}: ptr={*}", .{ segment, ptr });
 
-    const page_index = segment.pageIndex(buf.ptr);
+    const page_index = segment.pageIndex(ptr);
     const page_node = &segment.pages[page_index];
     const page = &page_node.data;
-    const slot = page.containingSlotSegment(segment, buf.ptr);
+    const slot = page.containingSlotSegment(segment, ptr);
 
     if (std.Thread.getCurrentId() == self.thread_id) {
         log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
@@ -256,7 +253,7 @@ pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void 
         }
     }
     const segment = Segment.ofPtr(buf.ptr);
-    self.deallocateInSegment(segment, buf, log2_align, ret_addr);
+    self.deallocateInSegment(segment, buf.ptr, log2_align, ret_addr);
 }
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
