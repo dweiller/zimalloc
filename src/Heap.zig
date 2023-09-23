@@ -364,9 +364,9 @@ fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
 // a branch in the fast allocation path
 const null_page_list_node = Page.List.Node{
     .data = Page{
-        .local_free_list = .{ .first = null, .last = undefined },
-        .alloc_free_list = .{ .first = null, .last = undefined },
-        .other_free_list = .{ .first = null, .last = undefined },
+        .local_free_list = .{ .first = null },
+        .alloc_free_list = .{ .first = null },
+        .other_free_list = .{ .first = null },
         .used_count = 0,
         .other_freed = 0,
         .capacity = 0,
