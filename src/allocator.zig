@@ -1,7 +1,7 @@
 pub const Config = struct {
     thread_data_prealloc: usize = 128,
     thread_safe: bool = !builtin.single_threaded,
-    safety_checks: bool = std.debug.runtime_safety,
+    safety_checks: bool = builtin.mode == .Debug,
 };
 
 pub fn Allocator(comptime config: Config) type {
