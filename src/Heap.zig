@@ -1,6 +1,8 @@
 thread_id: std.Thread.Id,
 pages: [size_class_count]Page.List,
-segments: ?Segment.Ptr,
+// TODO: Not using ?Segment.Ptr is a workaroiund for a compiler issue.
+//       Revert this when possible, see github.com/dweiller/zimalloc/issues/15
+segments: ?*align(constants.segment_alignment) Segment,
 huge_allocations: HugeAllocTable,
 
 const Heap = @This();
