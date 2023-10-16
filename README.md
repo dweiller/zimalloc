@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     // -- snip --
     const zimalloc = b.dependency("zimalloc").module("zimalloc"); // get the zimalloc module
     // -- snip --
-    exe.addModule(zimalloc); // add the zimalloc module as a depenency of exe
+    exe.addModule(zimalloc); // add the zimalloc module as a dependency of exe
     // -- snip --
 }
 ```
