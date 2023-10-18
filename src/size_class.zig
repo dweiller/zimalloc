@@ -207,9 +207,11 @@ const assert = @import("assert.zig");
 
 const constants = @import("constants.zig");
 
-test {
-    _ = branching;
-    _ = branchless;
+comptime {
+    if (@import("builtin").is_test) {
+        _ = branching;
+        _ = branchless;
+    }
 }
 
 test "branchless equals branching" {
