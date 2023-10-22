@@ -18,7 +18,7 @@ comptime {
         @compileError("FreeList.Node must fit inside the minimum slot size");
     }
     if (@alignOf(FreeList.Node) > constants.min_slot_alignment) {
-        @compileError("FreeList.Node must have alignment no greater than the minimum slot alignmentk");
+        @compileError("FreeList.Node must have alignment no greater than the minimum slot alignment");
     }
 }
 
