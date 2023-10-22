@@ -106,6 +106,7 @@ pub fn allocateSizeClass(self: *Heap, segment_map: SegmentMap.Ptr, class: usize,
                 const in_use_count = node.data.used_count - other_freed;
                 if (in_use_count == 0) {
                     const descriptor = segment_map.descriptorOfPtr(node.data.getPtrInFreeSlot());
+                    assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
                     deinitPage(segment_map, node, page_list) catch |err|
                         log.warn("could not madvise page: {s}", .{@errorName(err)});
                     node = prev.next; // deinitPage changed prev.next to node.next
@@ -191,6 +192,7 @@ pub fn resizeWithMap(
     }
 
     const descriptor = segment_map.descriptorOfPtr(buf.ptr);
+    assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
     const segment = descriptor.segment;
     const page_index = segment.pageIndex(buf.ptr);
     assert.withMessage(@src(), descriptor.init_set.isSet(page_index), "segment init_set corrupt with resizing");
@@ -211,6 +213,7 @@ pub fn deallocateInSegment(
     _ = log2_align;
     _ = ret_addr;
     const descriptor = segment_map.descriptorOfPtr(ptr);
+    assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
     log.debugVerbose("deallocate in {*}: ptr={*}", .{ descriptor.segment.start, ptr });
 
     const page_index = descriptor.segment.pageIndex(ptr);
@@ -267,6 +270,7 @@ fn existingDescriptorForNewPage(self: *Heap, segment_map: SegmentMap.Ptr, slot_s
         const page_size = @as(usize, 1) << segment.page_shift;
         const segment_max_slot_size = page_size / constants.min_slots_per_page;
         const descriptor = segment_map.descriptorOfPtr(segment.start);
+        assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
         if (descriptor.init_set.count() < segment.page_count and segment_max_slot_size >= slot_size) {
             return descriptor;
         }
@@ -301,6 +305,7 @@ fn initPage(self: *Heap, segment_map: SegmentMap.Ptr, class: usize) error{OutOfM
 
     const descriptor = self.existingDescriptorForNewPage(segment_map, slot_size) orelse
         try self.initDescriptorForNewPage(segment_map, slot_size);
+    assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
 
     const segment = &descriptor.segment;
 

@@ -81,6 +81,7 @@ pub fn Allocator(comptime config: Config) type {
             }
 
             const descriptor = self.segment_map.descriptorOfPtr(ptr);
+            assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
             const heap = descriptor.heap;
 
             if (!descriptor.in_use) return null;
@@ -173,6 +174,7 @@ pub fn Allocator(comptime config: Config) type {
             assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
 
             const descriptor = self.segment_map.descriptorOfPtr(buf.ptr);
+            assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
             const heap = descriptor.heap;
 
             self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
@@ -208,6 +210,7 @@ pub fn Allocator(comptime config: Config) type {
 
         pub fn usableSizeInSegment(self: *Self, ptr: *const anyopaque) usize {
             const descriptor = self.segment_map.descriptorOfPtr(ptr);
+            assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
             const segment = descriptor.segment;
 
             if (config.safety_checks) if (!self.ownsHeap(descriptor.heap)) {

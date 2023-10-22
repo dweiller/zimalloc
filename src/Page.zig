@@ -53,6 +53,7 @@ pub fn deinit(self: *Page, segment_map: SegmentMap.Ptr) !void {
     const ptr_in_page = self.getPtrInFreeSlot();
 
     const descriptor = segment_map.descriptorOfPtr(ptr_in_page);
+    assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
     const segment = &descriptor.segment;
 
     const page_index = segment.pageIndex(ptr_in_page);

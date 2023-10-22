@@ -75,13 +75,14 @@ pub fn provision(self: Ptr, heap: *Heap, segment: Segment) *SegmentDescriptor {
     const index = self.segmentIndex(segment.start);
 
     const descriptor = &self.descriptors()[index];
-    // assert.withMessage(@src(), !self.descriptors()[index].in_use, "descriptor is already in use");
+    assert.withMessage(@src(), !descriptor.in_use, "descriptor is already in use");
 
     descriptor.in_use = true;
     descriptor.is_huge = false;
     descriptor.segment = segment;
     descriptor.heap = heap;
     descriptor.init_set = PageBitSet.initEmpty();
+
     return descriptor;
 }
 
