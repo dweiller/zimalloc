@@ -73,12 +73,46 @@ pub fn Allocator(comptime config: Config) type {
             retain_exclusive,
         };
 
+        /// Behaviour is undefined if `buf` is not owned by `self`.
         pub fn getThreadHeap(
             self: *Self,
             buf: []const u8,
             comptime locking: LockRetention,
-        ) ?HeapAllocKind {
-            return self.getThreadHeapPtr(buf.ptr, locking);
+        ) HeapAllocKind {
+            if (buf.len > constants.max_slot_size_large_page) {
+                self.thread_heaps_lock.lockShared();
+                defer self.thread_heaps_lock.unlockShared();
+                var heap_iter = self.thread_heaps.iterator(0);
+                while (heap_iter.next()) |heap| {
+                    switch (locking) {
+                        .retain_shared, .drop => heap.huge_allocations.lockShared(),
+                        .retain_exclusive => heap.huge_allocations.lock(),
+                    }
+
+                    if (heap.huge_allocations.getRaw(buf.ptr)) |size| {
+                        if (locking == .drop) heap.huge_allocations.unlockShared();
+                        return .{ .heap = heap, .kind = .{ .huge = size } };
+                    }
+
+                    switch (locking) {
+                        .retain_shared, .drop => heap.huge_allocations.unlockShared(),
+                        .retain_exclusive => heap.huge_allocations.unlock(),
+                    }
+                }
+            }
+
+            const descriptor = self.segment_map.descriptorOfPtr(buf.ptr);
+            assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
+            const heap = descriptor.heap;
+
+            assert.withMessage(@src(), descriptor.in_use, "slice is not owned by the allocator");
+            assert.withMessage(@src(), !descriptor.is_huge, "corrupt huge allocation table or segment descriptor");
+
+            if (config.safety_checks) {
+                assert.withMessage(@src(), self.ownsHeap(heap), "slice is not owned by the allocator");
+            }
+
+            return .{ .heap = heap, .kind = .segment };
         }
 
         pub fn getThreadHeapPtr(
@@ -187,19 +221,18 @@ pub fn Allocator(comptime config: Config) type {
             ret_addr: usize,
         ) void {
             log.debugVerbose("deallocate: buf=({*}, {d}) log2_align={d}", .{ buf.ptr, buf.len, log2_align });
-            if (self.getThreadHeap(buf, .retain_exclusive)) |heap_kind| {
-                const heap = heap_kind.heap;
+            const heap_kind = self.getThreadHeap(buf, .retain_exclusive);
+            const heap = heap_kind.heap;
 
-                switch (heap_kind.kind) {
-                    .huge => |_| {
-                        self.freeHugeFromHeap(heap, buf, log2_align, ret_addr, true);
-                        heap.huge_allocations.unlock();
-                    },
-                    .segment => {
-                        assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
-                        self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
-                    },
-                }
+            switch (heap_kind.kind) {
+                .huge => |_| {
+                    self.freeHugeFromHeap(heap, buf, log2_align, ret_addr, true);
+                    heap.huge_allocations.unlock();
+                },
+                .segment => {
+                    assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
+                    self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
+                },
             }
         }
 
@@ -249,8 +282,20 @@ pub fn Allocator(comptime config: Config) type {
             return slot.len - offset;
         }
 
+        /// Behaviour is undefined if `buf` is not owned by `self`.
+        pub fn usableSize(self: *Self, buf: []const u8) usize {
+            const heap_kind = self.getThreadHeap(buf, .retain_shared);
+            switch (heap_kind.kind) {
+                .huge => |size| {
+                    heap_kind.heap.huge_allocations.unlockShared();
+                    return std.mem.alignForward(usize, size, std.mem.page_size);
+                },
+                .segment => return self.usableSizeInSegment(buf.ptr),
+            }
+        }
+
         /// Returns zero if `ptr` is not owned by `self`
-        pub fn usableSize(self: *Self, ptr: *const anyopaque) usize {
+        pub fn usableSizePtr(self: *Self, ptr: *const anyopaque) usize {
             if (self.getThreadHeapPtr(ptr, .retain_shared)) |heap_kind| {
                 switch (heap_kind.kind) {
                     .huge => |size| {
@@ -263,15 +308,10 @@ pub fn Allocator(comptime config: Config) type {
             return 0;
         }
 
+        /// Behaviour is undefined if `buf` is not owned by `self`.
         pub fn canResize(self: *Self, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
             // TODO: this implementation locks the huge allocation table of a containing heap twice
-            const heap_kind = self.getThreadHeap(buf, .drop) orelse {
-                if (config.safety_checks) {
-                    log.err("invalid resize: {*} is not part of an owned heap", .{buf});
-                    return false;
-                } else unreachable;
-            };
-
+            const heap_kind = self.getThreadHeap(buf, .drop);
             return heap_kind.heap.resizeWithMap(self.segment_map, buf, log2_align, new_len, ret_addr);
         }
 

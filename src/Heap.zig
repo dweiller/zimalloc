@@ -177,6 +177,8 @@ pub fn resizeWithMap(
     );
 
     if (self.huge_allocations.get(buf.ptr)) |size| {
+        if (new_len <= constants.max_slot_size_large_page) return false;
+
         const slice: []align(std.mem.page_size) u8 = @alignCast(buf.ptr[0..size]);
         const can_resize = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
             huge_alignment.resizeAllocation(slice, new_len)
