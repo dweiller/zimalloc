@@ -312,7 +312,37 @@ pub fn Allocator(comptime config: Config) type {
         pub fn canResize(self: *Self, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
             // TODO: this implementation locks the huge allocation table of a containing heap twice
             const heap_kind = self.getThreadHeap(buf, .drop);
-            return heap_kind.heap.resizeWithMap(self.segment_map, buf, log2_align, new_len, ret_addr);
+            const heap = heap_kind.heap;
+            switch (heap_kind.kind) {
+                .huge => |size| {
+                    if (new_len <= constants.max_slot_size_large_page) return false;
+
+                    const slice: []align(std.mem.page_size) u8 = @alignCast(buf.ptr[0..size]);
+                    const can_resize = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
+                        @import("huge_alignment.zig").resizeAllocation(slice, new_len)
+                    else
+                        std.heap.page_allocator.rawResize(slice, log2_align, new_len, ret_addr);
+
+                    if (can_resize) {
+                        const new_aligned_len = std.mem.alignForward(usize, new_len, std.mem.page_size);
+                        heap.huge_allocations.putAssumeCapacity(buf.ptr, new_aligned_len);
+                        return true;
+                    } else {
+                        return false;
+                    }
+                },
+                .segment => {
+                    const descriptor = self.segment_map.descriptorOfPtr(buf.ptr);
+                    assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
+                    const segment = descriptor.segment;
+                    const page_index = segment.pageIndex(buf.ptr);
+                    assert.withMessage(@src(), descriptor.init_set.isSet(page_index), "segment init_set corrupt while resizing");
+                    const page_node = &(descriptor.pages[page_index]);
+                    const page = &page_node.data;
+                    const slot = page.containingSlot(segment, buf.ptr);
+                    return @intFromPtr(buf.ptr) + new_len <= @intFromPtr(slot.ptr) + slot.len;
+                },
+            }
         }
 
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
