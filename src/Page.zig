@@ -132,19 +132,19 @@ fn slotAtIndex(first_slot_address: usize, index: usize, slot_size: usize) Slot {
     return slot_ptr[0..slot_size];
 }
 
-fn slotIndexOfPtr(first_slot_address: usize, slot_size: usize, ptr: *anyopaque) usize {
+fn slotIndexOfPtr(first_slot_address: usize, slot_size: usize, ptr: *const anyopaque) usize {
     const bytes_address = @intFromPtr(ptr);
     return (bytes_address - first_slot_address) / slot_size;
 }
 
 /// returns the `Slot` containing `bytes.ptr`
-pub fn containingSlot(self: *const Page, ptr: *anyopaque) Slot {
+pub fn containingSlot(self: *const Page, ptr: *const anyopaque) Slot {
     const segment = Segment.ofPtr(self);
     return self.containingSlotSegment(segment, ptr);
 }
 
 /// returns the `Slot` containing `bytes.ptr`
-pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *anyopaque) Slot {
+pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *const anyopaque) Slot {
     const page_slice = segment.pageSlice(segment.pageIndex(ptr));
     const first_slot_address = firstSlotAddress(@intFromPtr(page_slice.ptr), self.slot_size);
     const index = slotIndexOfPtr(first_slot_address, self.slot_size, ptr);

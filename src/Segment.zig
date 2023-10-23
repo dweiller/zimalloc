@@ -64,7 +64,7 @@ pub fn deinit(self: Ptr) void {
     self.deallocateSegment();
 }
 
-pub fn pageIndex(self: ConstPtr, ptr: *anyopaque) usize {
+pub fn pageIndex(self: ConstPtr, ptr: *const anyopaque) usize {
     assert.withMessage(@src(), @intFromPtr(self) < @intFromPtr(ptr), "pointer address is lower than the page address");
     return (@intFromPtr(ptr) - @intFromPtr(self)) >> self.page_shift;
 }

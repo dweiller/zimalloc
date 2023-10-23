@@ -61,7 +61,7 @@ pub fn Allocator(comptime config: Config) type {
 
         pub fn getThreadHeap(
             self: *Self,
-            ptr: *anyopaque,
+            ptr: *const anyopaque,
         ) ?*Heap {
             // TODO: check this is valid on windows
             // this check also covers buf.len > constants.max_slot_size_large_page
@@ -203,7 +203,7 @@ pub fn Allocator(comptime config: Config) type {
             if (!lock_held) heap.huge_allocations.unlock();
         }
 
-        pub fn usableSizeInSegment(self: *Self, ptr: *anyopaque) usize {
+        pub fn usableSizeInSegment(self: *Self, ptr: *const anyopaque) usize {
             const segment = Segment.ofPtr(ptr);
 
             if (config.safety_checks) if (!self.ownsHeap(segment.heap)) {
@@ -219,7 +219,7 @@ pub fn Allocator(comptime config: Config) type {
             return slot.len - offset;
         }
 
-        pub fn usableSize(self: *Self, ptr: *anyopaque) usize {
+        pub fn usableSize(self: *Self, ptr: *const anyopaque) usize {
             if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
                 self.thread_heaps_lock.lockShared();
                 defer self.thread_heaps_lock.unlockShared();
