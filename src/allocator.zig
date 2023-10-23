@@ -62,10 +62,30 @@ pub fn Allocator(comptime config: Config) type {
             return false;
         }
 
+        pub const HeapAllocKind = struct {
+            heap: *Heap,
+            kind: union(enum) { huge: usize, segment: void },
+        };
+
+        pub const LockRetention = enum {
+            drop,
+            retain_shared,
+            retain_exclusive,
+        };
+
         pub fn getThreadHeap(
             self: *Self,
+            buf: []const u8,
+            comptime locking: LockRetention,
+        ) ?HeapAllocKind {
+            return self.getThreadHeapPtr(buf.ptr, locking);
+        }
+
+        pub fn getThreadHeapPtr(
+            self: *Self,
             ptr: *const anyopaque,
-        ) ?*Heap {
+            comptime locking: LockRetention,
+        ) ?HeapAllocKind {
             // TODO: check this is valid on windows
             // this check also covers buf.len > constants.max_slot_size_large_page
 
@@ -74,8 +94,19 @@ pub fn Allocator(comptime config: Config) type {
                 defer self.thread_heaps_lock.unlockShared();
                 var heap_iter = self.thread_heaps.iterator(0);
                 while (heap_iter.next()) |heap| {
-                    if (heap.huge_allocations.contains(ptr)) {
-                        return heap;
+                    switch (locking) {
+                        .retain_shared, .drop => heap.huge_allocations.lockShared(),
+                        .retain_exclusive => heap.huge_allocations.lock(),
+                    }
+
+                    if (heap.huge_allocations.getRaw(ptr)) |size| {
+                        if (locking == .drop) heap.huge_allocations.unlockShared();
+                        return .{ .heap = heap, .kind = .{ .huge = size } };
+                    }
+
+                    switch (locking) {
+                        .retain_shared, .drop => heap.huge_allocations.unlockShared(),
+                        .retain_exclusive => heap.huge_allocations.unlock(),
                     }
                 }
             }
@@ -91,7 +122,7 @@ pub fn Allocator(comptime config: Config) type {
                 if (!self.ownsHeap(heap)) return null;
             }
 
-            return heap;
+            return .{ .heap = heap, .kind = .segment };
         }
 
         pub fn allocator(self: *Self) std.mem.Allocator {
@@ -156,28 +187,20 @@ pub fn Allocator(comptime config: Config) type {
             ret_addr: usize,
         ) void {
             log.debugVerbose("deallocate: buf=({*}, {d}) log2_align={d}", .{ buf.ptr, buf.len, log2_align });
-            // TODO: check this is valid on windows
-            // this check also covers buf.len > constants.max_slot_size_large_page
-            if (std.mem.isAligned(@intFromPtr(buf.ptr), std.mem.page_size)) {
-                self.thread_heaps_lock.lockShared();
-                defer self.thread_heaps_lock.unlockShared();
-                var heap_iter = self.thread_heaps.iterator(0);
-                while (heap_iter.next()) |heap| {
-                    heap.huge_allocations.lock();
-                    defer heap.huge_allocations.unlock();
-                    if (heap.huge_allocations.containsRaw(buf.ptr)) {
+            if (self.getThreadHeap(buf, .retain_exclusive)) |heap_kind| {
+                const heap = heap_kind.heap;
+
+                switch (heap_kind.kind) {
+                    .huge => |_| {
                         self.freeHugeFromHeap(heap, buf, log2_align, ret_addr, true);
-                        return;
-                    }
+                        heap.huge_allocations.unlock();
+                    },
+                    .segment => {
+                        assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
+                        self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
+                    },
                 }
             }
-            assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
-
-            const descriptor = self.segment_map.descriptorOfPtr(buf.ptr);
-            assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
-            const heap = descriptor.heap;
-
-            self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
         }
 
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
@@ -226,31 +249,30 @@ pub fn Allocator(comptime config: Config) type {
             return slot.len - offset;
         }
 
+        /// Returns zero if `ptr` is not owned by `self`
         pub fn usableSize(self: *Self, ptr: *const anyopaque) usize {
-            if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
-                self.thread_heaps_lock.lockShared();
-                defer self.thread_heaps_lock.unlockShared();
-                var heap_iter = self.thread_heaps.iterator(0);
-                while (heap_iter.next()) |heap| {
-                    if (heap.huge_allocations.get(ptr)) |size| {
-                        // WARNING: this depends on the implementation of std.heap.PageAllocator
-                        // aligning allocated lengths to the page size
+            if (self.getThreadHeapPtr(ptr, .retain_shared)) |heap_kind| {
+                switch (heap_kind.kind) {
+                    .huge => |size| {
+                        heap_kind.heap.huge_allocations.unlockShared();
                         return std.mem.alignForward(usize, size, std.mem.page_size);
-                    }
+                    },
+                    .segment => return self.usableSizeInSegment(ptr),
                 }
             }
-            return self.usableSizeInSegment(ptr);
+            return 0;
         }
 
         pub fn canResize(self: *Self, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
-            const owning_heap = self.getThreadHeap(buf.ptr) orelse {
+            // TODO: this implementation locks the huge allocation table of a containing heap twice
+            const heap_kind = self.getThreadHeap(buf, .drop) orelse {
                 if (config.safety_checks) {
                     log.err("invalid resize: {*} is not part of an owned heap", .{buf});
                     return false;
                 } else unreachable;
             };
 
-            return owning_heap.resizeWithMap(self.segment_map, buf, log2_align, new_len, ret_addr);
+            return heap_kind.heap.resizeWithMap(self.segment_map, buf, log2_align, new_len, ret_addr);
         }
 
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {

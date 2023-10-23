@@ -47,20 +47,22 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
 export fn free(ptr_opt: ?*anyopaque) void {
     log.debug("free {?*}", .{ptr_opt});
     if (ptr_opt) |ptr| {
-        const heap = allocator_instance.getThreadHeap(ptr) orelse {
+        const heap_kind = allocator_instance.getThreadHeapPtr(ptr, .drop) orelse {
             invalid("invalid free: {*} - no valid heap", .{ptr});
             return;
         };
 
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
+        const heap = heap_kind.heap;
 
-        if (heap.huge_allocations.get(ptr)) |size| {
-            assert.withMessage(@src(), size != 0, "BUG: huge allocation size should be > 0");
-            const slice = bytes_ptr[0..size];
-            @memset(slice, undefined);
-            allocator_instance.freeHugeFromHeap(heap, slice, 0, @returnAddress(), false);
-        } else {
-            allocator_instance.freeNonHugeFromHeap(heap, bytes_ptr, 0, @returnAddress());
+        switch (heap_kind.kind) {
+            .huge => |size| {
+                assert.withMessage(@src(), size != 0, "BUG: huge allocation size should be > 0");
+                const slice = bytes_ptr[0..size];
+                @memset(slice, undefined);
+                allocator_instance.freeHugeFromHeap(heap, slice, 0, @returnAddress(), false);
+            },
+            .segment => allocator_instance.freeNonHugeFromHeap(heap, bytes_ptr, 0, @returnAddress()),
         }
     }
 }
