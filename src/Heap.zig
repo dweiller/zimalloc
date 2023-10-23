@@ -163,47 +163,6 @@ pub fn allocate(self: *Heap, segment_map: SegmentMap.Ptr, len: usize, log2_align
     return self.allocateSizeClass(segment_map, class, log2_align);
 }
 
-pub fn resizeWithMap(
-    self: *Heap,
-    segment_map: SegmentMap.Ptr,
-    buf: []u8,
-    log2_align: u8,
-    new_len: usize,
-    ret_addr: usize,
-) bool {
-    log.debugVerbose(
-        "canResizeInPlace: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
-        .{ buf.ptr, buf.len, log2_align, new_len },
-    );
-
-    if (self.huge_allocations.get(buf.ptr)) |size| {
-        if (new_len <= constants.max_slot_size_large_page) return false;
-
-        const slice: []align(std.mem.page_size) u8 = @alignCast(buf.ptr[0..size]);
-        const can_resize = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
-            huge_alignment.resizeAllocation(slice, new_len)
-        else
-            std.heap.page_allocator.rawResize(slice, log2_align, new_len, ret_addr);
-        if (can_resize) {
-            const new_aligned_len = std.mem.alignForward(usize, new_len, std.mem.page_size);
-            self.huge_allocations.putAssumeCapacity(buf.ptr, new_aligned_len);
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    const descriptor = segment_map.descriptorOfPtr(buf.ptr);
-    assert.withMessage(@src(), descriptor.in_use, "descriptor.in_use is not set");
-    const segment = descriptor.segment;
-    const page_index = segment.pageIndex(buf.ptr);
-    assert.withMessage(@src(), descriptor.init_set.isSet(page_index), "segment init_set corrupt with resizing");
-    const page_node = &(descriptor.pages[page_index]);
-    const page = &page_node.data;
-    const slot = page.containingSlot(segment, buf.ptr);
-    return @intFromPtr(buf.ptr) + new_len <= @intFromPtr(slot.ptr) + slot.len;
-}
-
 /// behaviour is undefined if `self` and `segment` do not own `buf.ptr`.
 pub fn deallocateInSegment(
     self: *Heap,
