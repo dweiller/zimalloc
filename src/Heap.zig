@@ -3,7 +3,6 @@ pages: [size_class_count]Page.List,
 // TODO: Not using ?Segment.Ptr is a workaroiund for a compiler issue.
 //       Revert this when possible, see github.com/dweiller/zimalloc/issues/15
 segments: ?*align(constants.segment_alignment) Segment,
-huge_allocations: HugeAllocTable,
 
 const Heap = @This();
 
@@ -16,7 +15,6 @@ pub fn init() Heap {
         // `isNullPageNode()` is used to check before any modifications are attempted.
         .pages = .{Page.List{ .head = @constCast(&null_page_list_node) }} ** size_class_count,
         .segments = null,
-        .huge_allocations = .{},
     };
 }
 
@@ -26,7 +24,6 @@ pub fn deinit(self: *Heap) void {
         segment_iter = segment.next;
         segment.deinit();
     }
-    self.huge_allocations.deinit(std.heap.page_allocator);
 }
 
 pub fn allocator(self: *Heap) std.mem.Allocator {
@@ -40,39 +37,7 @@ pub fn allocator(self: *Heap) std.mem.Allocator {
     };
 }
 
-pub const Alloc = struct {
-    ptr: [*]align(constants.min_slot_alignment) u8,
-    backing_size: usize,
-    is_huge: bool,
-};
-
-pub fn allocateHuge(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
-    assert.withMessage(@src(), self.thread_id == std.Thread.getCurrentId(), "tried to allocate from wrong thread");
-
-    log.debug("allocateHuge: len={d}, log2_align={d}", .{ len, log2_align });
-
-    self.huge_allocations.lock();
-    defer self.huge_allocations.unlock();
-
-    self.huge_allocations.ensureUnusedCapacityRaw(std.heap.page_allocator, 1) catch {
-        log.debug("could not expand huge alloc table", .{});
-        return null;
-    };
-
-    const ptr = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
-        (huge_alignment.allocate(len, @as(usize, 1) << @intCast(log2_align)) orelse return null).ptr
-    else
-        std.heap.page_allocator.rawAlloc(len, log2_align, ret_addr) orelse return null;
-
-    self.huge_allocations.putAssumeCapacityNoClobberRaw(ptr, len);
-    return .{
-        .ptr = @alignCast(ptr),
-        .backing_size = std.mem.alignForward(usize, len, std.mem.page_size),
-        .is_huge = true,
-    };
-}
-
-pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
+pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(constants.min_slot_alignment) u8 {
     assert.withMessage(@src(), class < size_class_count, "requested size class is too big");
 
     log.debugVerbose(
@@ -87,11 +52,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc fast path", .{});
         const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
-        return .{
-            .ptr = @ptrFromInt(aligned_address),
-            .backing_size = buf.len,
-            .is_huge = false,
-        };
+        return @ptrFromInt(aligned_address);
     }
 
     if (isNullPageNode(page_node)) unlikely() else {
@@ -101,11 +62,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc slow path (first page)", .{});
         const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
-        return .{
-            .ptr = @ptrFromInt(aligned_address),
-            .backing_size = buf.len,
-            .is_huge = false,
-        };
+        return @ptrFromInt(aligned_address);
     }
 
     log.debugVerbose("alloc slow path", .{});
@@ -142,59 +99,49 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?Alloc {
         break :slot new_page.data.allocSlotFast().?;
     };
     const aligned_address = std.mem.alignForwardLog2(@intFromPtr(slot.ptr), log2_align);
-    return .{
-        .ptr = @ptrFromInt(aligned_address),
-        .backing_size = slot.len,
-        .is_huge = false,
-    };
+    return @ptrFromInt(aligned_address);
 }
 
-pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?Alloc {
+pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?[*]align(constants.min_slot_alignment) u8 {
+    _ = ret_addr;
     assert.withMessage(@src(), self.thread_id == std.Thread.getCurrentId(), "tried to allocate from wrond thread");
     log.debugVerbose(
         "allocate: len={d}, log2_align={d}",
         .{ len, log2_align },
     );
 
+    const slot_size = requiredSlotSize(len, log2_align);
+
+    assert.withMessage(
+        @src(),
+        slot_size <= constants.max_slot_size_large_page,
+        "slot size required is greater than maximum slot size",
+    );
+
+    const class = sizeClass(slot_size);
+
+    return self.allocateSizeClass(class, log2_align);
+}
+
+pub fn requiredSlotSize(len: usize, log2_align: u8) usize {
     const next_size = indexToSize(sizeClass(len));
     const next_size_log2_align = @ctz(next_size);
 
-    const slot_size_min = if (log2_align <= next_size_log2_align)
+    return if (log2_align <= next_size_log2_align)
         len
     else blk: {
         const alignment = @as(usize, 1) << @intCast(log2_align);
         break :blk len + alignment - 1;
     };
-
-    if (slot_size_min > constants.max_slot_size_large_page) {
-        return self.allocateHuge(len, log2_align, ret_addr);
-    }
-
-    const class = sizeClass(slot_size_min);
-
-    return self.allocateSizeClass(class, log2_align);
 }
 
 pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+    _ = self;
+    _ = ret_addr;
     log.debugVerbose(
         "canResizeInPlace: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
         .{ buf.ptr, buf.len, log2_align, new_len },
     );
-
-    if (self.huge_allocations.get(buf.ptr)) |size| {
-        const slice: []align(std.mem.page_size) u8 = @alignCast(buf.ptr[0..size]);
-        const can_resize = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
-            huge_alignment.resizeAllocation(slice, new_len)
-        else
-            std.heap.page_allocator.rawResize(slice, log2_align, new_len, ret_addr);
-        if (can_resize) {
-            const new_aligned_len = std.mem.alignForward(usize, new_len, std.mem.page_size);
-            self.huge_allocations.putAssumeCapacity(buf.ptr, new_aligned_len);
-            return true;
-        } else {
-            return false;
-        }
-    }
 
     const segment = Segment.ofPtr(buf.ptr);
     const page_index = segment.pageIndex(buf.ptr);
@@ -231,36 +178,16 @@ pub fn deallocateInSegment(
     }
 }
 
-/// behaviour is undefined if `self` does not own `buf` and it's not a large
-/// allocation. The caller must lock `self.huge_allocations`.
-pub fn deallocateHuge(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
-    log.debug("deallocate huge allocation {*}", .{buf.ptr});
-    if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
-        huge_alignment.deallocate(@alignCast(buf))
-    else
-        std.heap.page_allocator.rawFree(buf, log2_align, ret_addr);
-
-    assert.withMessage(@src(), self.huge_allocations.removeRaw(buf.ptr), "huge allocation table corrupt with deallocating");
-}
-
 // returns the backing size of the `buf`; behaviour is undefined if
 // `self` does not own `buf.ptr`.
 pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
-    {
-        self.huge_allocations.lock();
-        defer self.huge_allocations.unlock();
-
-        if (self.huge_allocations.containsRaw(buf.ptr)) {
-            return self.deallocateHuge(buf, log2_align, ret_addr);
-        }
-    }
     const segment = Segment.ofPtr(buf.ptr);
     self.deallocateInSegment(segment, buf.ptr, log2_align, ret_addr);
 }
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
     const self: *@This() = @ptrCast(@alignCast(ctx));
-    return if (self.allocate(len, log2_align, ret_addr)) |a| a.ptr else null;
+    return self.allocate(len, log2_align, ret_addr);
 }
 
 fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
@@ -392,13 +319,11 @@ const std = @import("std");
 const assert = @import("assert.zig");
 const log = @import("log.zig");
 const constants = @import("constants.zig");
-const huge_alignment = @import("huge_alignment.zig");
 
 const size_class = @import("size_class.zig");
 const indexToSize = size_class.branching.toSize;
 const sizeClass = size_class.branching.ofSize;
 
-const HugeAllocTable = @import("HugeAllocTable.zig");
 const Page = @import("Page.zig");
 const Segment = @import("Segment.zig");
 
@@ -434,20 +359,20 @@ test "slot alignment" {
     defer heap.deinit();
 
     for (0..size_class_count) |class| {
-        const allocation = heap.allocateSizeClass(class, 0) orelse {
+        const ptr = heap.allocateSizeClass(class, 0) orelse {
             log.err("failed to allocate size class {d}", .{class});
             return error.BadSizeClass;
         };
-        const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(allocation.ptr)));
+        const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(ptr)));
         try std.testing.expect(@ctz(indexToSize(class)) <= actual_log2_align);
     }
     for (0..size_class_count) |class| {
         const log2_align = @ctz(indexToSize(class));
-        const allocation = heap.allocateSizeClass(class, log2_align) orelse {
+        const ptr = heap.allocateSizeClass(class, log2_align) orelse {
             log.err("failed to allocate size class {d}", .{class});
             return error.BadSizeClass;
         };
-        try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(allocation.ptr), log2_align));
+        try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(ptr), log2_align));
     }
 }
 
@@ -456,58 +381,27 @@ test "allocate with larger alignment" {
     defer heap.deinit();
 
     for (0..size_class_count) |class| {
-        const size = (3 * indexToSize(class)) / 2;
-        const slot_log2_align = @ctz(indexToSize(class));
+        const size = indexToSize(class);
+        const slot_log2_align = @ctz(size);
+        for (0..slot_log2_align) |log2_align| {
+            const ptr = heap.allocate(size, @intCast(log2_align), 0) orelse {
+                log.err("failed to allocate size {d} with log2_align {d} (class {d})", .{ size, log2_align, class });
+                return error.BadSizeClass;
+            };
+            const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(ptr)));
+            try std.testing.expect(@ctz(indexToSize(class)) <= actual_log2_align);
+        }
+    }
+
+    for (0..size_class_count - 1) |class| {
+        const size = indexToSize(class) / 2;
+        const slot_log2_align = @ctz(size);
         const log2_align = slot_log2_align + 1;
-        const allocation = heap.allocate(size, log2_align, 0) orelse {
-            log.err("failed to allocate size class {d}", .{class});
+        const ptr = heap.allocate(size, @intCast(log2_align), 0) orelse {
+            log.err("failed to allocate size {d} with log2_align {d} (class {d})", .{ size, log2_align, class });
             return error.BadSizeClass;
         };
-        const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(allocation.ptr)));
+        const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(ptr)));
         try std.testing.expect(@ctz(indexToSize(class)) <= actual_log2_align);
-    }
-}
-
-test "huge allocation alignment - allocateHuge" {
-    var heap = Heap.init();
-    defer heap.deinit();
-
-    const log2_align_start = std.math.log2_int(usize, std.mem.page_size);
-    const log2_align_end = std.math.log2_int(usize, constants.segment_alignment) + 1;
-    for (log2_align_start..log2_align_end) |log2_align| {
-        const allocation = heap.allocateHuge(@as(usize, 1) << @intCast(log2_align), @intCast(log2_align), 0) orelse {
-            log.err("failed to allocate with log2_align {d}", .{log2_align});
-            return error.BadAlignment;
-        };
-        try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(allocation.ptr), @intCast(log2_align)));
-    }
-}
-
-test "huge allocation alignment - allocate" {
-    var heap = Heap.init();
-    defer heap.deinit();
-
-    const log2_align_start = std.math.log2_int(usize, std.mem.page_size);
-    const log2_align_end = std.math.log2_int(usize, constants.segment_alignment) + 1;
-    for (log2_align_start..log2_align_end) |log2_align| {
-        const allocation = heap.allocate(@as(usize, 1) << @intCast(log2_align), @intCast(log2_align), 0) orelse {
-            log.err("failed to allocate with log2_align {d}", .{log2_align});
-            return error.BadAlignment;
-        };
-        try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(allocation.ptr), @intCast(log2_align)));
-    }
-}
-
-test "non-huge size with huge alignment" {
-    var heap = Heap.init();
-    defer heap.deinit();
-
-    const start_log_align = @ctz(@as(usize, constants.max_slot_size_large_page)) + 1;
-    for (start_log_align..start_log_align + 4) |log2_align| {
-        const allocation = heap.allocate(indexToSize(5), @intCast(log2_align), 0) orelse {
-            log.err("failed to allocate with log2_align {d}", .{log2_align});
-            return error.BadAlignment;
-        };
-        try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(allocation.ptr), @intCast(log2_align)));
     }
 }

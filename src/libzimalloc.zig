@@ -35,19 +35,19 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
 export fn free(ptr_opt: ?*anyopaque) void {
     log.debug("free {?*}", .{ptr_opt});
     if (ptr_opt) |ptr| {
-        const heap = allocator_instance.getThreadHeap(ptr) orelse {
-            invalid("invalid free: {*} - no valid heap", .{ptr});
-            return;
-        };
-
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
 
-        if (heap.huge_allocations.get(ptr)) |size| {
+        if (allocator_instance.huge_allocations.get(ptr)) |size| {
             assert.withMessage(@src(), size != 0, "BUG: huge allocation size should be > 0");
             const slice = bytes_ptr[0..size];
             @memset(slice, undefined);
-            allocator_instance.freeHugeFromHeap(heap, slice, 0, @returnAddress(), false);
+            allocator_instance.freeHuge(slice, 0, @returnAddress(), false);
         } else {
+            const heap = allocator_instance.getThreadHeap(ptr) orelse {
+                invalid("invalid free: {*} - no valid heap", .{ptr});
+                return;
+            };
+
             allocator_instance.freeNonHugeFromHeap(heap, bytes_ptr, 0, @returnAddress());
         }
     }
