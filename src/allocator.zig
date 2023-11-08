@@ -7,12 +7,17 @@ pub const Config = struct {
 pub fn Allocator(comptime config: Config) type {
     return struct {
         backing_allocator: std.mem.Allocator = std.heap.page_allocator,
-        thread_heaps: std.SegmentedList(Heap, config.thread_data_prealloc) = .{},
+        thread_heaps: std.SegmentedList(HeapData, config.thread_data_prealloc) = .{},
         thread_heaps_lock: std.Thread.RwLock = .{},
         huge_allocations: HugeAllocTable = .{},
         // TODO: atomic access
 
         const Self = @This();
+
+        const HeapData = struct {
+            heap: Heap,
+            thread_id: std.Thread.Id,
+        };
 
         pub fn init(backing_allocator: std.mem.Allocator) error{OutOfMemory}!Self {
             return .{
@@ -24,8 +29,8 @@ pub fn Allocator(comptime config: Config) type {
         pub fn deinit(self: *Self) void {
             self.thread_heaps_lock.lock();
             var heap_iter = self.thread_heaps.iterator(0);
-            while (heap_iter.next()) |heap| {
-                heap.deinit();
+            while (heap_iter.next()) |data| {
+                data.heap.deinit();
             }
             self.thread_heaps.deinit(self.backing_allocator);
             self.* = undefined;
@@ -43,10 +48,10 @@ pub fn Allocator(comptime config: Config) type {
 
             const new_ptr = self.thread_heaps.addOne(self.backing_allocator) catch return null;
 
-            new_ptr.* = Heap.init();
+            new_ptr.* = .{ .heap = Heap.init(), .thread_id = thread_id };
 
-            log.debug("heap initialised: {*}", .{new_ptr});
-            return new_ptr;
+            log.debug("heap initialised: {*}", .{&new_ptr.heap});
+            return &new_ptr.heap;
         }
 
         fn ownsHeap(self: *Self, heap: *const Heap) bool {
@@ -54,8 +59,8 @@ pub fn Allocator(comptime config: Config) type {
             self.thread_heaps_lock.lockShared();
             defer self.thread_heaps_lock.unlockShared();
             var iter = self.thread_heaps.constIterator(0);
-            while (iter.next()) |child_heap| : (index += 1) {
-                if (child_heap == heap) return true;
+            while (iter.next()) |child_data| : (index += 1) {
+                if (&child_data.heap == heap) return true;
             }
             return false;
         }
@@ -103,10 +108,10 @@ pub fn Allocator(comptime config: Config) type {
             self.thread_heaps_lock.lockShared();
 
             var iter = self.thread_heaps.iterator(0);
-            while (iter.next()) |heap| {
-                if (heap.thread_id == thread_id) {
+            while (iter.next()) |data| {
+                if (data.thread_id == thread_id) {
                     self.thread_heaps_lock.unlockShared();
-                    return self.allocInHeap(heap, len, log2_align, ret_addr);
+                    return self.allocInHeap(&data.heap, len, log2_align, ret_addr);
                 }
             } else {
                 self.thread_heaps_lock.unlockShared();
@@ -145,7 +150,7 @@ pub fn Allocator(comptime config: Config) type {
             _ = self;
             assert.withMessage(
                 @src(),
-                heap.thread_id == std.Thread.getCurrentId(),
+                @fieldParentPtr(HeapData, "heap", heap).thread_id == std.Thread.getCurrentId(),
                 "tried to allocated from wrong thread",
             );
 
@@ -179,14 +184,30 @@ pub fn Allocator(comptime config: Config) type {
 
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
             log.debug("freeing non-huge allocation", .{});
-            const segment = Segment.ofPtr(ptr);
-
             if (config.safety_checks) if (!self.ownsHeap(heap)) {
                 log.err("invalid free: {*} is not part of an owned heap", .{ptr});
                 return;
             };
 
-            heap.deallocateInSegment(segment, ptr, log2_align, ret_addr);
+            _ = log2_align;
+            _ = ret_addr;
+            const segment = Segment.ofPtr(ptr);
+            log.debugVerbose("deallocate in heap {*}: segment={*}, ptr={*}", .{ heap, segment, ptr });
+
+            const page_index = segment.pageIndex(ptr);
+            const page_node = &segment.pages[page_index];
+            const page = &page_node.data;
+            const slot = page.containingSlotSegment(segment, ptr);
+
+            const thread_id = @fieldParentPtr(HeapData, "heap", heap).thread_id;
+
+            if (std.Thread.getCurrentId() == thread_id) {
+                log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
+                page.freeLocalAligned(slot);
+            } else {
+                log.debugVerbose("moving slot {*} to other freelist on thread {d}", .{ slot.ptr, thread_id });
+                page.freeOtherAligned(slot);
+            }
         }
 
         pub fn freeHuge(

@@ -1,4 +1,3 @@
-thread_id: std.Thread.Id,
 pages: [size_class_count]Page.List,
 // TODO: Not using ?Segment.Ptr is a workaroiund for a compiler issue.
 //       Revert this when possible, see github.com/dweiller/zimalloc/issues/15
@@ -8,7 +7,6 @@ const Heap = @This();
 
 pub fn init() Heap {
     return .{
-        .thread_id = std.Thread.getCurrentId(),
         // WARNING: It is important that `isNullPageNode()` is used to check if the head of a page
         // list is null before any operation that may modify it or try to access the next/prev pages
         // as these pointers are undefined. Use of @constCast here should be safe as long as
@@ -104,7 +102,6 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(co
 
 pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?[*]align(constants.min_slot_alignment) u8 {
     _ = ret_addr;
-    assert.withMessage(@src(), self.thread_id == std.Thread.getCurrentId(), "tried to allocate from wrond thread");
     log.debugVerbose(
         "allocate: len={d}, log2_align={d}",
         .{ len, log2_align },
@@ -152,37 +149,21 @@ pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, 
     return @intFromPtr(buf.ptr) + new_len <= @intFromPtr(slot.ptr) + slot.len;
 }
 
-/// behaviour is undefined if `self` and `segment` do not own `buf.ptr`.
-pub fn deallocateInSegment(
-    self: *Heap,
-    segment: Segment.Ptr,
-    ptr: [*]u8,
-    log2_align: u8,
-    ret_addr: usize,
-) void {
+//  behaviour is undefined if `self` does not own `buf.ptr`.
+pub fn deallocate(self: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
+    _ = self;
     _ = log2_align;
     _ = ret_addr;
-    log.debugVerbose("deallocate in {*}: ptr={*}", .{ segment, ptr });
+    const segment = Segment.ofPtr(ptr);
+    log.debugVerbose("Heap.deallocate in {*}: ptr={*}", .{ segment, ptr });
 
     const page_index = segment.pageIndex(ptr);
     const page_node = &segment.pages[page_index];
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, ptr);
 
-    if (std.Thread.getCurrentId() == self.thread_id) {
-        log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
-        page.freeLocalAligned(slot);
-    } else {
-        log.debugVerbose("moving slot {*} to other freelist on thread {d}", .{ slot.ptr, self.thread_id });
-        page.freeOtherAligned(slot);
-    }
-}
-
-// returns the backing size of the `buf`; behaviour is undefined if
-// `self` does not own `buf.ptr`.
-pub fn deallocate(self: *Heap, buf: []u8, log2_align: u8, ret_addr: usize) void {
-    const segment = Segment.ofPtr(buf.ptr);
-    self.deallocateInSegment(segment, buf.ptr, log2_align, ret_addr);
+    log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
+    page.freeLocalAligned(slot);
 }
 
 fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
@@ -197,7 +178,7 @@ fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: 
 
 fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
     const self: *@This() = @ptrCast(@alignCast(ctx));
-    _ = self.deallocate(buf, log2_align, ret_addr);
+    self.deallocate(buf.ptr, log2_align, ret_addr);
 }
 
 fn getSegmentWithEmptySlot(self: *Heap, slot_size: u32) ?Segment.Ptr {
