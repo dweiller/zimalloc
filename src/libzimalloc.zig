@@ -8,7 +8,7 @@ export fn malloc(len: usize) ?*anyopaque {
 export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
     log.debug("realloc {?*} {d}", .{ ptr_opt, len });
     if (ptr_opt) |ptr| {
-        const old_size = allocator_instance.usableSize(ptr);
+        const old_size = allocator_instance.usableSizePtr(ptr);
 
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
         const old_slice = bytes_ptr[0..old_size];
@@ -103,7 +103,7 @@ export fn pvalloc(size: usize) ?*anyopaque {
 export fn malloc_usable_size(ptr_opt: ?*anyopaque) usize {
     log.debug("malloc_usable_size {?*}", .{ptr_opt});
     if (ptr_opt) |ptr| {
-        return allocator_instance.usableSize(ptr);
+        return allocator_instance.usableSizePtr(ptr);
     }
     return 0;
 }
