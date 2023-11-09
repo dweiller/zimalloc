@@ -249,7 +249,15 @@ pub fn Allocator(comptime config: Config) type {
             return slot.len - offset;
         }
 
-        pub fn usableSize(self: *Self, ptr: *const anyopaque) usize {
+        /// Returns 0 if `ptr` is not  owned by `self`.
+        pub fn usableSize(self: *Self, buf: []const u8) usize {
+            if (buf.len <= constants.max_slot_size_large_page) {
+                return self.usableSizeInSegment(buf.ptr);
+            }
+            return self.huge_allocations.get(buf.ptr) orelse 0;
+        }
+
+        pub fn usableSizePtr(self: *Self, ptr: *const anyopaque) usize {
             if (std.mem.isAligned(@intFromPtr(ptr), std.mem.page_size)) {
                 if (self.huge_allocations.get(ptr)) |size| {
                     // WARNING: this depends on the implementation of std.heap.PageAllocator
@@ -260,8 +268,21 @@ pub fn Allocator(comptime config: Config) type {
             return self.usableSizeInSegment(ptr);
         }
 
+        /// Benhaviour is undefined if `buf` is not owned by `self`.
         pub fn canResize(self: *Self, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+            if (buf.len <= constants.max_slot_size_large_page) {
+                const owning_heap = self.getThreadHeap(buf.ptr) orelse {
+                    if (config.safety_checks) {
+                        log.err("invalid resize: {*} is not part of an owned heap", .{buf});
+                        return false;
+                    } else unreachable;
+                };
+
+                return owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
+            }
             if (self.huge_allocations.get(buf.ptr)) |size| {
+                if (new_len <= constants.max_slot_size_large_page) return false;
+
                 const slice: []align(std.mem.page_size) u8 = @alignCast(buf.ptr[0..size]);
                 const can_resize = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
                     huge_alignment.resizeAllocation(slice, new_len)
@@ -271,19 +292,9 @@ pub fn Allocator(comptime config: Config) type {
                     const new_aligned_len = std.mem.alignForward(usize, new_len, std.mem.page_size);
                     self.huge_allocations.putAssumeCapacity(buf.ptr, new_aligned_len);
                     return true;
-                } else {
-                    return false;
                 }
             }
-
-            const owning_heap = self.getThreadHeap(buf.ptr) orelse {
-                if (config.safety_checks) {
-                    log.err("invalid resize: {*} is not part of an owned heap", .{buf});
-                    return false;
-                } else unreachable;
-            };
-
-            return owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
+            return false;
         }
 
         fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
