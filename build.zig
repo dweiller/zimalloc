@@ -34,8 +34,8 @@ pub fn build(b: *std.Build) void {
 
     const zimalloc_options = build_options.createModule();
     const zimalloc = b.addModule("zimalloc", .{
-        .source_file = .{ .path = "src/zimalloc.zig" },
-        .dependencies = &.{
+        .root_source_file = .{ .path = "src/zimalloc.zig" },
+        .imports = &.{
             .{ .name = "build_options", .module = zimalloc_options },
         },
     });
@@ -84,7 +84,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    tests.addModule("build_options", zimalloc_options);
+    tests.root_module.addImport("build_options", zimalloc_options);
 
     const tests_run = b.addRunArtifact(tests);
 
@@ -108,11 +108,12 @@ pub fn build(b: *std.Build) void {
         const exe_name = test_name[0 .. test_name.len - 4];
         const test_exe = b.addExecutable(.{
             .name = exe_name,
+            .target = target,
             .root_source_file = .{ .path = b.pathJoin(&.{ "test", test_name }) },
             .optimize = optimize,
         });
-        test_exe.addModule("zimalloc", zimalloc);
-        test_exe.addOptions("build_options", standalone_options);
+        test_exe.root_module.addImport("zimalloc", zimalloc);
+        test_exe.root_module.addOptions("build_options", standalone_options);
 
         const install_step = b.addInstallArtifact(test_exe, .{
             .dest_dir = .{ .override = .{ .custom = "test" } },
@@ -126,11 +127,11 @@ pub fn build(b: *std.Build) void {
 }
 
 const LibzimallocOptions = struct {
-    target: std.zig.CrossTarget,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.Mode,
     zimalloc_options: *std.Build.Module,
     linkage: std.Build.Step.Compile.Linkage = .dynamic,
-    force_pic: bool = true,
+    pic: ?bool = true,
 };
 
 fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Compile {
@@ -143,6 +144,7 @@ fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Co
             .target = options.target,
             .optimize = options.optimize,
             .link_libc = true,
+            .pic = options.pic,
         }),
         .static => b.addStaticLibrary(.{
             .name = "zimalloc",
@@ -151,11 +153,11 @@ fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Co
             .target = options.target,
             .optimize = options.optimize,
             .link_libc = true,
+            .pic = options.pic,
         }),
     };
 
-    libzimalloc.addModule("build_options", options.zimalloc_options);
-    libzimalloc.force_pic = options.force_pic;
+    libzimalloc.root_module.addImport("build_options", options.zimalloc_options);
     return libzimalloc;
 }
 

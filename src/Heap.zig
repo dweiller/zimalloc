@@ -329,7 +329,7 @@ test "create/destroy loop" {
         const size = comptime indexToSize(class);
         for (0..1000) |i| {
             std.log.debug("iteration {d}", .{i});
-            var ptr = try ally.create([size]u8);
+            const ptr = try ally.create([size]u8);
             ally.destroy(ptr);
         }
     }
