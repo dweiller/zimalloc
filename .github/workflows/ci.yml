@@ -10,7 +10,15 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact: libzimalloc.so
+          - os: windows-latest
+            artifact: zimalloc.*
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -21,6 +29,7 @@ jobs:
            version: master
 
       - name: Check formatting
+        if: runner.os == 'Linux'
         run: zig fmt --check .
 
       - name: Run tests
@@ -38,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: libzimalloc
-          path: zig-out-*/lib/libzimalloc.so
+          path: zig-out-*/lib/${{ matrix.artifact }}
 
   mimalloc-bench-smoke-test:
     runs-on: ubuntu-latest

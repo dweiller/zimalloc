@@ -48,6 +48,11 @@ pub fn build(b: *std.Build) void {
         .zimalloc_options = zimalloc_options,
     });
 
+    if (target.isWindows()) {
+        libzimalloc.linkSystemLibrary("kernel32");
+        libzimalloc.linkSystemLibrary("advapi32");
+    }
+
     const libzimalloc_install = b.addInstallArtifact(libzimalloc, .{});
     b.getInstallStep().dependOn(&libzimalloc_install.step);
     libzimalloc_step.dependOn(&libzimalloc_install.step);
