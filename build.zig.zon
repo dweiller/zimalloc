@@ -1,0 +1,5 @@
+.{
+    .name = "zimalloc",
+    .version = "0.0.0",
+    .paths = .{ "build.zig.zon", "build.zig", "src", "README.md", "LISENSE", "test" },
+}
