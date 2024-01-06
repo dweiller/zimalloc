@@ -53,7 +53,7 @@ fn testCreateDestroyLoop(comptime config: Config) !void {
 
     for (0..1000) |i| {
         std.log.debug("iteration {d}", .{i});
-        var ptr = try allocator.create(u32);
+        const ptr = try allocator.create(u32);
         allocator.destroy(ptr);
     }
 }
