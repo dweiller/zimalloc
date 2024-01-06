@@ -67,7 +67,6 @@ zig build libzimalloc -Doptimize=ReleaseSafe
 ## Notes
 
   - The current implementation works on Linux, with other systems untested.
-  - There are likely still data races present in multi-threaded workloads.
   - The main suite of tests currently used is `https://github.com/daanx/mimalloc-bench`
     which are run using `LD_PRELOAD`. Not all tests have been tried, but all those that have been tested
     run successfully.
