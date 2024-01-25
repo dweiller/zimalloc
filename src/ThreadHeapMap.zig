@@ -34,6 +34,20 @@ pub fn initThreadHeap(self: *ThreadHeapMap, thread_id: std.Thread.Id) ?*Entry {
     return &node.data;
 }
 
+/// behaviour is undefined if `thread_id` is not present in the map
+pub fn deinitThread(self: *ThreadHeapMap, thread_id: std.Thread.Id) void {
+    var iter = self.iterator(.exclusive);
+    defer iter.unlock();
+    while (iter.next()) |entry| {
+        if (entry.thread_id == thread_id) {
+            entry.heap.deinit();
+            const node = @fieldParentPtr(List.Node, "data", entry);
+            self.list.remove(node);
+            return;
+        }
+    }
+}
+
 pub fn ownsHeap(self: *ThreadHeapMap, heap: *const Heap) bool {
     var iter = self.constIterator(.shared);
     defer iter.unlock();
