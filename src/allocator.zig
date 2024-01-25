@@ -55,6 +55,15 @@ pub fn Allocator(comptime config: Config) type {
             return heap;
         }
 
+        /// behaviour is undefined if `thread_id` is not used by the allocator
+        pub fn deinitThreadHeap(self: *Self, thread_id: std.Thread.Id) void {
+            self.thread_heaps.deinitThread(thread_id);
+        }
+
+        pub fn deinitCurrentThreadHeap(self: *Self) void {
+            self.deinitThreadHeap(std.Thread.getCurrentId());
+        }
+
         pub fn allocator(self: *Self) std.mem.Allocator {
             return .{
                 .ptr = self,
