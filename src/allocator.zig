@@ -8,17 +8,13 @@ pub const Config = struct {
 pub fn Allocator(comptime config: Config) type {
     return struct {
         backing_allocator: std.mem.Allocator = std.heap.page_allocator,
-        thread_heaps: std.SegmentedList(HeapData, config.thread_data_prealloc) = .{},
-        thread_heaps_lock: std.Thread.RwLock = .{},
+        thread_heaps: ThreadMap = .{},
         huge_allocations: HugeAllocTable(config.store_huge_alloc_size) = .{},
         // TODO: atomic access
 
         const Self = @This();
 
-        const HeapData = struct {
-            heap: Heap,
-            thread_id: std.Thread.Id,
-        };
+        const ThreadMap = ThreadHeapMap(config.thread_data_prealloc);
 
         pub fn init(backing_allocator: std.mem.Allocator) error{OutOfMemory}!Self {
             return .{
@@ -28,11 +24,6 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.thread_heaps_lock.lock();
-            var heap_iter = self.thread_heaps.iterator(0);
-            while (heap_iter.next()) |data| {
-                data.heap.deinit();
-            }
             self.thread_heaps.deinit(self.backing_allocator);
             self.huge_allocations.deinit(std.heap.page_allocator);
             self.* = undefined;
@@ -44,26 +35,12 @@ pub fn Allocator(comptime config: Config) type {
             const thread_id = std.Thread.getCurrentId();
             log.debug("initialising heap for thread {d}", .{thread_id});
 
-            log.debugVerbose("obtaining heap lock", .{});
-            self.thread_heaps_lock.lock();
-            defer self.thread_heaps_lock.unlock();
-
-            const new_ptr = self.thread_heaps.addOne(self.backing_allocator) catch return null;
-
-            new_ptr.* = .{ .heap = Heap.init(), .thread_id = thread_id };
-
-            log.debug("heap initialised: {*}", .{&new_ptr.heap});
-            return &new_ptr.heap;
-        }
-
-        fn ownsHeap(self: *Self, heap: *const Heap) bool {
-            self.thread_heaps_lock.lockShared();
-            defer self.thread_heaps_lock.unlockShared();
-            var iter = self.thread_heaps.constIterator(0);
-            while (iter.next()) |child_data| {
-                if (&child_data.heap == heap) return true;
+            if (self.thread_heaps.initThreadHeap(self.backing_allocator, thread_id)) |entry| {
+                log.debug("heap added to thread map: {*}", .{&entry.heap});
+                return &entry.heap;
             }
-            return false;
+
+            return null;
         }
 
         pub fn getThreadHeap(
@@ -74,7 +51,7 @@ pub fn Allocator(comptime config: Config) type {
             const heap = segment.heap;
 
             if (config.safety_checks) {
-                if (!self.ownsHeap(heap)) return null;
+                if (!self.thread_heaps.ownsHeap(heap)) return null;
             }
 
             return heap;
@@ -106,16 +83,15 @@ pub fn Allocator(comptime config: Config) type {
             const thread_id = std.Thread.getCurrentId();
 
             log.debugVerbose("obtaining shared thread heaps lock", .{});
-            self.thread_heaps_lock.lockShared();
 
-            var iter = self.thread_heaps.iterator(0);
+            var iter = self.thread_heaps.iterator(.shared);
             while (iter.next()) |data| {
                 if (data.thread_id == thread_id) {
-                    self.thread_heaps_lock.unlockShared();
+                    iter.unlock();
                     return self.allocInHeap(&data.heap, len, log2_align, ret_addr);
                 }
             } else {
-                self.thread_heaps_lock.unlockShared();
+                iter.unlock();
                 const heap = self.initHeapForThread() orelse return null;
                 return self.allocInHeap(heap, len, log2_align, ret_addr);
             }
@@ -151,7 +127,7 @@ pub fn Allocator(comptime config: Config) type {
             _ = self;
             assert.withMessage(
                 @src(),
-                @fieldParentPtr(HeapData, "heap", heap).thread_id == std.Thread.getCurrentId(),
+                @fieldParentPtr(ThreadMap.Entry, "heap", heap).thread_id == std.Thread.getCurrentId(),
                 "tried to allocated from wrong thread",
             );
 
@@ -185,7 +161,7 @@ pub fn Allocator(comptime config: Config) type {
 
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
             log.debug("freeing non-huge allocation", .{});
-            if (config.safety_checks) if (!self.ownsHeap(heap)) {
+            if (config.safety_checks) if (!self.thread_heaps.ownsHeap(heap)) {
                 log.err("invalid free: {*} is not part of an owned heap", .{ptr});
                 return;
             };
@@ -200,7 +176,7 @@ pub fn Allocator(comptime config: Config) type {
             const page = &page_node.data;
             const slot = page.containingSlotSegment(segment, ptr);
 
-            const thread_id = @fieldParentPtr(HeapData, "heap", heap).thread_id;
+            const thread_id = @fieldParentPtr(ThreadMap.Entry, "heap", heap).thread_id;
 
             if (std.Thread.getCurrentId() == thread_id) {
                 log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
@@ -237,7 +213,7 @@ pub fn Allocator(comptime config: Config) type {
         pub fn usableSizeInSegment(self: *Self, ptr: *const anyopaque) usize {
             const segment = Segment.ofPtr(ptr);
 
-            if (config.safety_checks) if (!self.ownsHeap(segment.heap)) {
+            if (config.safety_checks) if (!self.thread_heaps.ownsHeap(segment.heap)) {
                 log.err("invalid pointer: {*} is not part of an owned heap", .{ptr});
                 return 0;
             };
@@ -397,3 +373,4 @@ const huge_alignment = @import("huge_alignment.zig");
 const Heap = @import("Heap.zig");
 const Segment = @import("Segment.zig");
 const HugeAllocTable = @import("HugeAllocTable.zig").HugeAllocTable;
+const ThreadHeapMap = @import("thread_heaps.zig").ThreadHeapMap;
