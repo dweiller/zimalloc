@@ -33,6 +33,7 @@ pub fn Allocator(comptime config: Config) type {
                 data.heap.deinit();
             }
             self.thread_heaps.deinit(self.backing_allocator);
+            self.huge_allocations.deinit(std.heap.page_allocator);
             self.* = undefined;
         }
 
@@ -55,11 +56,10 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         fn ownsHeap(self: *Self, heap: *const Heap) bool {
-            var index: usize = 0;
             self.thread_heaps_lock.lockShared();
             defer self.thread_heaps_lock.unlockShared();
             var iter = self.thread_heaps.constIterator(0);
-            while (iter.next()) |child_data| : (index += 1) {
+            while (iter.next()) |child_data| {
                 if (&child_data.heap == heap) return true;
             }
             return false;
