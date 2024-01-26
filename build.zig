@@ -163,6 +163,7 @@ fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Co
 
 const standalone_tests = [_][]const u8{
     "create-destroy-loop.zig",
+    "multi-threaded-loop.zig",
 };
 
 const TestBuildConfig = struct {
