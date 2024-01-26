@@ -9,8 +9,7 @@ pub fn main() !void {
     const allocator = zigpa.allocator();
 
     if (comptime build_options.pauses) {
-        std.debug.print("hit [enter] to enter loop\n", .{});
-        waitForInput();
+        waitForInput("enter loop");
     }
 
     inline for (.{ 1, 2, 3, 4 }) |_| {
@@ -24,8 +23,7 @@ pub fn main() !void {
 
         if (comptime build_options.pauses) {
             std.debug.print("memory allocated\n", .{});
-            std.debug.print("hit [enter] to free memory\n", .{});
-            waitForInput();
+            waitForInput("free memory");
             std.debug.print("freeing memory\n", .{});
         }
 
@@ -34,13 +32,13 @@ pub fn main() !void {
         }
         if (comptime build_options.pauses) {
             std.debug.print("memory freed\n", .{});
-            std.debug.print("hit [enter] to continue\n", .{});
-            waitForInput();
+            waitForInput("continue");
         }
     }
 }
 
-fn waitForInput() void {
+fn waitForInput(action: []const u8) void {
+    std.debug.print("hit [enter] to {s}\n", .{action});
     const stdin = std.io.getStdIn().reader();
     var buf: [64]u8 = undefined;
     _ = stdin.readUntilDelimiter(&buf, '\n') catch return;
