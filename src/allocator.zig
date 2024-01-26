@@ -8,13 +8,11 @@ pub const Config = struct {
 pub fn Allocator(comptime config: Config) type {
     return struct {
         backing_allocator: std.mem.Allocator = std.heap.page_allocator,
-        thread_heaps: ThreadMap = .{},
+        thread_heaps: ThreadHeapMap = .{},
         huge_allocations: HugeAllocTable(config.store_huge_alloc_size) = .{},
         // TODO: atomic access
 
         const Self = @This();
-
-        const ThreadMap = ThreadHeapMap(config.thread_data_prealloc);
 
         pub fn init(backing_allocator: std.mem.Allocator) error{OutOfMemory}!Self {
             return .{
@@ -24,7 +22,7 @@ pub fn Allocator(comptime config: Config) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.thread_heaps.deinit(self.backing_allocator);
+            self.thread_heaps.deinit();
             self.huge_allocations.deinit(std.heap.page_allocator);
             self.* = undefined;
         }
@@ -35,7 +33,7 @@ pub fn Allocator(comptime config: Config) type {
             const thread_id = std.Thread.getCurrentId();
             log.debug("initialising heap for thread {d}", .{thread_id});
 
-            if (self.thread_heaps.initThreadHeap(self.backing_allocator, thread_id)) |entry| {
+            if (self.thread_heaps.initThreadHeap(thread_id)) |entry| {
                 log.debug("heap added to thread map: {*}", .{&entry.heap});
                 return &entry.heap;
             }
@@ -127,7 +125,7 @@ pub fn Allocator(comptime config: Config) type {
             _ = self;
             assert.withMessage(
                 @src(),
-                @fieldParentPtr(ThreadMap.Entry, "heap", heap).thread_id == std.Thread.getCurrentId(),
+                @fieldParentPtr(ThreadHeapMap.Entry, "heap", heap).thread_id == std.Thread.getCurrentId(),
                 "tried to allocated from wrong thread",
             );
 
@@ -176,7 +174,7 @@ pub fn Allocator(comptime config: Config) type {
             const page = &page_node.data;
             const slot = page.containingSlotSegment(segment, ptr);
 
-            const thread_id = @fieldParentPtr(ThreadMap.Entry, "heap", heap).thread_id;
+            const thread_id = @fieldParentPtr(ThreadHeapMap.Entry, "heap", heap).thread_id;
 
             if (std.Thread.getCurrentId() == thread_id) {
                 log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
@@ -373,4 +371,4 @@ const huge_alignment = @import("huge_alignment.zig");
 const Heap = @import("Heap.zig");
 const Segment = @import("Segment.zig");
 const HugeAllocTable = @import("HugeAllocTable.zig").HugeAllocTable;
-const ThreadHeapMap = @import("thread_heaps.zig").ThreadHeapMap;
+const ThreadHeapMap = @import("ThreadHeapMap.zig");

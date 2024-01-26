@@ -1,0 +1,107 @@
+list: List = .{},
+lock: std.Thread.RwLock = .{},
+pool: Pool = Pool.init(std.heap.page_allocator),
+
+const ThreadHeapMap = @This();
+
+const List = std.DoublyLinkedList(Entry);
+const Pool = std.heap.MemoryPool(List.Node);
+
+pub const Entry = struct {
+    heap: Heap,
+    thread_id: std.Thread.Id,
+};
+
+pub fn deinit(self: *ThreadHeapMap) void {
+    self.lock.lock();
+
+    self.pool.deinit();
+    self.* = undefined;
+}
+
+pub fn initThreadHeap(self: *ThreadHeapMap, thread_id: std.Thread.Id) ?*Entry {
+    log.debugVerbose("obtaining heap lock", .{});
+    self.lock.lock();
+    defer self.lock.unlock();
+
+    const node = self.pool.create() catch return null;
+    node.* = .{
+        .data = .{ .heap = Heap.init(), .thread_id = thread_id },
+    };
+
+    self.list.prepend(node);
+
+    return &node.data;
+}
+
+pub fn ownsHeap(self: *ThreadHeapMap, heap: *const Heap) bool {
+    var iter = self.constIterator(.shared);
+    defer iter.unlock();
+    while (iter.next()) |entry| {
+        if (&entry.heap == heap) return true;
+    }
+    return false;
+}
+
+pub const LockType = enum {
+    shared,
+    exclusive,
+};
+
+pub fn constIterator(self: *ThreadHeapMap, comptime kind: LockType) ConstIterator(kind) {
+    switch (kind) {
+        .shared => self.lock.lockShared(),
+        .exclusive => self.lock.lock(),
+    }
+    return .{
+        .current = self.list.first,
+        .lock = &self.lock,
+    };
+}
+
+pub fn iterator(self: *ThreadHeapMap, comptime kind: LockType) Iterator(kind) {
+    switch (kind) {
+        .shared => self.lock.lockShared(),
+        .exclusive => self.lock.lock(),
+    }
+    return .{
+        .current = self.list.first,
+        .lock = &self.lock,
+    };
+}
+
+pub fn ConstIterator(comptime kind: LockType) type {
+    return BaseIterator(*const List.Node, *const Entry, kind);
+}
+
+pub fn Iterator(comptime kind: LockType) type {
+    return BaseIterator(*List.Node, *Entry, kind);
+}
+
+fn BaseIterator(comptime NodeType: type, comptime EntryType: type, comptime kind: LockType) type {
+    return struct {
+        current: ?NodeType,
+        lock: *std.Thread.RwLock,
+
+        pub fn next(self: *@This()) ?EntryType {
+            const node = self.current orelse return null;
+            const result: EntryType = &node.data;
+            self.current = node.next;
+            return result;
+        }
+
+        pub fn unlock(self: @This()) void {
+            switch (kind) {
+                .shared => self.lock.unlockShared(),
+                .exclusive => self.lock.unlock(),
+            }
+        }
+    };
+}
+
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
+const Heap = @import("Heap.zig");
+const log = @import("log.zig");
+const list = @import("list.zig");
