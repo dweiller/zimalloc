@@ -230,7 +230,7 @@ pub fn Allocator(comptime config: Config) type {
 
                 assert.withMessage(@src(), self.huge_allocations.removeRaw(buf.ptr), "huge allocation table corrupt with deallocating");
             } else {
-                log.err("invalid free: {*} is not part of an owned heap", .{buf.ptr});
+                log.err("invalid huge free: {*} is not part of an owned heap", .{buf.ptr});
             }
         }
 
