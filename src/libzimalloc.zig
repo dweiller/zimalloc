@@ -1,4 +1,6 @@
-var allocator_instance = zimalloc.Allocator(.{}){};
+var allocator_instance = zimalloc.Allocator(.{
+    .store_huge_alloc_size = true,
+}){};
 
 export fn malloc(len: usize) ?*anyopaque {
     log.debug("malloc {d}", .{len});

@@ -2,6 +2,7 @@ pub const Config = struct {
     thread_data_prealloc: usize = 128,
     thread_safe: bool = !builtin.single_threaded,
     safety_checks: bool = builtin.mode == .Debug,
+    store_huge_alloc_size: bool = false,
 };
 
 pub fn Allocator(comptime config: Config) type {
@@ -9,7 +10,7 @@ pub fn Allocator(comptime config: Config) type {
         backing_allocator: std.mem.Allocator = std.heap.page_allocator,
         thread_heaps: std.SegmentedList(HeapData, config.thread_data_prealloc) = .{},
         thread_heaps_lock: std.Thread.RwLock = .{},
-        huge_allocations: HugeAllocTable = .{},
+        huge_allocations: HugeAllocTable(config.store_huge_alloc_size) = .{},
         // TODO: atomic access
 
         const Self = @This();
@@ -268,7 +269,7 @@ pub fn Allocator(comptime config: Config) type {
             return self.usableSizeInSegment(ptr);
         }
 
-        /// Benhaviour is undefined if `buf` is not owned by `self`.
+        /// Behaviour is undefined if `buf` is not an allocation returned by `self`.
         pub fn canResize(self: *Self, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
             if (buf.len <= constants.max_slot_size_large_page) {
                 const owning_heap = self.getThreadHeap(buf.ptr) orelse {
@@ -280,10 +281,10 @@ pub fn Allocator(comptime config: Config) type {
 
                 return owning_heap.canResizeInPlace(buf, log2_align, new_len, ret_addr);
             }
-            if (self.huge_allocations.get(buf.ptr)) |size| {
+            if (self.huge_allocations.contains(buf.ptr)) {
                 if (new_len <= constants.max_slot_size_large_page) return false;
 
-                const slice: []align(std.mem.page_size) u8 = @alignCast(buf.ptr[0..size]);
+                const slice: []align(std.mem.page_size) u8 = @alignCast(buf);
                 const can_resize = if (@as(usize, 1) << @intCast(log2_align) > std.mem.page_size)
                     huge_alignment.resizeAllocation(slice, new_len)
                 else
@@ -395,4 +396,4 @@ const huge_alignment = @import("huge_alignment.zig");
 
 const Heap = @import("Heap.zig");
 const Segment = @import("Segment.zig");
-const HugeAllocTable = @import("HugeAllocTable.zig");
+const HugeAllocTable = @import("HugeAllocTable.zig").HugeAllocTable;
