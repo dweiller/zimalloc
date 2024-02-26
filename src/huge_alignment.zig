@@ -4,7 +4,7 @@ pub fn allocateOptions(
     size: usize,
     alignment: usize,
     prot: u32,
-    flags: u32,
+    flags: std.os.MAP,
 ) ?[]align(std.mem.page_size) u8 {
     assert.withMessage(@src(), alignment > std.mem.page_size, "alignment is not greater than the page size");
     assert.withMessage(@src(), std.mem.isValidAlign(alignment), "alignment is not a power of two");
@@ -36,7 +36,7 @@ pub fn allocate(size: usize, alignment: usize) ?[]align(std.mem.page_size) u8 {
         size,
         alignment,
         std.os.PROT.READ | std.os.PROT.WRITE,
-        std.os.MAP.PRIVATE | std.os.MAP.ANONYMOUS,
+        .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
     );
 }
 
