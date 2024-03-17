@@ -70,7 +70,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(co
             var prev = page_node;
             while (node != page_node) {
                 node.data.migrateFreeList();
-                const other_freed = @atomicLoad(Page.SlotCountInt, &node.data.other_freed, .Unordered);
+                const other_freed = @atomicLoad(Page.SlotCountInt, &node.data.other_freed, .unordered);
                 const in_use_count = node.data.used_count - other_freed;
                 if (in_use_count == 0) {
                     deinitPage(node, page_list) catch |err|

@@ -130,7 +130,7 @@ const LibzimallocOptions = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.Mode,
     zimalloc_options: *std.Build.Module,
-    linkage: std.Build.Step.Compile.Linkage = .dynamic,
+    linkage: std.builtin.LinkMode = .dynamic,
     pic: ?bool = true,
 };
 

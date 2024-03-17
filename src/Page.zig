@@ -99,7 +99,7 @@ pub fn migrateFreeList(self: *Page) void {
         &self.other_free_list.first,
         .Xchg,
         null,
-        .Monotonic,
+        .monotonic,
     );
 
     self.alloc_free_list.first = self.local_free_list.first;
@@ -114,7 +114,7 @@ pub fn migrateFreeList(self: *Page) void {
             self.alloc_free_list.prepend(n);
         }
         log.debug("updating other_freed: {d}", .{count});
-        _ = @atomicRmw(SlotCountInt, &self.other_freed, .Sub, count, .AcqRel);
+        _ = @atomicRmw(SlotCountInt, &self.other_freed, .Sub, count, .acq_rel);
 
         self.used_count -= count;
     }
@@ -165,16 +165,16 @@ pub fn freeOtherAligned(self: *Page, slot: Slot) void {
     assert.withMessage(@src(), self.used_count > 0, "tried to free foreign slot while used_count is 0");
 
     const node: *FreeList.Node = @ptrCast(slot);
-    node.next = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .Monotonic);
+    node.next = @atomicLoad(?*FreeList.Node, &self.other_free_list.first, .monotonic);
     // TODO: figure out correct atomic orders
-    _ = @atomicRmw(SlotCountInt, &self.other_freed, .Add, 1, .AcqRel);
+    _ = @atomicRmw(SlotCountInt, &self.other_freed, .Add, 1, .acq_rel);
     while (@cmpxchgWeak(
         ?*FreeList.Node,
         &self.other_free_list.first,
         node.next,
         node,
-        .Monotonic,
-        .Monotonic,
+        .monotonic,
+        .monotonic,
     )) |old_value| node.next = old_value;
 }
 
