@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
@@ -38,7 +38,7 @@ jobs:
           zig build libzimalloc -Doptimize=ReleaseFast -p zig-out-release-fast
 
       - name: Upload libzimalloc
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: libzimalloc
           path: zig-out-*/lib/libzimalloc.so
@@ -48,7 +48,7 @@ jobs:
     needs: build-and-test
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: daanx/mimalloc-bench
 
@@ -58,7 +58,7 @@ jobs:
 
       - name: Cache benchmarks
         id: cache-benchmarks
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             extern/
@@ -78,7 +78,7 @@ jobs:
 
       - name: Download libzimalloc artifact
         id: download
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: libzimalloc
           path: libzimalloc
