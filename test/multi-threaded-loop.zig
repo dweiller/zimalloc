@@ -19,7 +19,7 @@ pub fn main() !void {
         thread.* = try std.Thread.spawn(.{}, run, .{ i, &wg, &semaphore, &init_count });
     }
 
-    while (init_count.load(.Acquire) != 0) {
+    while (init_count.load(.acquire) != 0) {
         std.atomic.spinLoopHint();
     }
 
@@ -52,7 +52,7 @@ fn run(index: usize, wg: *std.Thread.WaitGroup, semaphore: *std.Thread.Semaphore
 
     const allocator = zigpa.allocator();
 
-    _ = init.fetchSub(1, .Release);
+    _ = init.fetchSub(1, .release);
 
     for (1..5) |i| {
         semaphore.wait();
