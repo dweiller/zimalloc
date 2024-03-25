@@ -60,7 +60,7 @@ pub fn deinit(self: *Page) !void {
     segment.init_set.unset(page_index);
 
     const page_bytes = segment.pageSlice(page_index);
-    try std.os.madvise(page_bytes.ptr, page_bytes.len, std.os.MADV.DONTNEED);
+    try std.posix.madvise(page_bytes.ptr, page_bytes.len, std.posix.MADV.DONTNEED);
 }
 
 pub fn getPtrInFreeSlot(self: *const Page) *align(constants.min_slot_alignment) anyopaque {

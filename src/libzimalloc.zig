@@ -75,7 +75,7 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
     }
 
     if (@popCount(alignment) != 1 or alignment < @sizeOf(*anyopaque)) {
-        return @intFromEnum(std.os.E.INVAL);
+        return @intFromEnum(std.posix.E.INVAL);
     }
 
     if (allocateBytes(size, alignment, @returnAddress(), false, false, false)) |p| {
@@ -83,7 +83,7 @@ export fn posix_memalign(ptr: *?*anyopaque, alignment: usize, size: usize) c_int
         return 0;
     }
 
-    return @intFromEnum(std.os.E.NOMEM);
+    return @intFromEnum(std.posix.E.NOMEM);
 }
 
 export fn memalign(alignment: usize, size: usize) ?*anyopaque {
