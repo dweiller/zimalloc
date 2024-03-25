@@ -85,6 +85,9 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     tests.root_module.addImport("build_options", zimalloc_options);
+    if (target.result.os.tag == .windows) {
+        tests.linkSystemLibrary("onecore.lib");
+    }
 
     const tests_run = b.addRunArtifact(tests);
 
