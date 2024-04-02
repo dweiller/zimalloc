@@ -41,7 +41,7 @@ pub fn deinitThread(self: *ThreadHeapMap, thread_id: std.Thread.Id) void {
     while (iter.next()) |entry| {
         if (entry.thread_id == thread_id) {
             entry.heap.deinit();
-            const node = @fieldParentPtr(List.Node, "data", entry);
+            const node: *List.Node = @fieldParentPtr("data", entry);
             self.list.remove(node);
             return;
         }

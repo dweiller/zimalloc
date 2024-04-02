@@ -132,9 +132,10 @@ pub fn Allocator(comptime config: Config) type {
             ret_addr: usize,
         ) ?[*]align(constants.min_slot_alignment) u8 {
             _ = self;
+            const entry: *const ThreadHeapMap.Entry = @fieldParentPtr("heap", heap);
             assert.withMessage(
                 @src(),
-                @fieldParentPtr(ThreadHeapMap.Entry, "heap", heap).thread_id == std.Thread.getCurrentId(),
+                entry.thread_id == std.Thread.getCurrentId(),
                 "tried to allocated from wrong thread",
             );
 
@@ -169,7 +170,7 @@ pub fn Allocator(comptime config: Config) type {
         pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
             log.debug("freeing non-huge allocation", .{});
             if (config.safety_checks) if (!self.thread_heaps.ownsHeap(heap)) {
-                log.err("invalid free: {*} is not part of an owned heap", .{ptr});
+                log.err("invalid free: {*} is not an owned heap", .{heap});
                 return;
             };
 
@@ -183,7 +184,7 @@ pub fn Allocator(comptime config: Config) type {
             const page = &page_node.data;
             const slot = page.containingSlotSegment(segment, ptr);
 
-            const thread_id = @fieldParentPtr(ThreadHeapMap.Entry, "heap", heap).thread_id;
+            const thread_id = @as(*ThreadHeapMap.Entry, @fieldParentPtr("heap", heap)).thread_id;
 
             if (std.Thread.getCurrentId() == thread_id) {
                 log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
