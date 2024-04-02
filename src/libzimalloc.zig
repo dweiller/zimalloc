@@ -45,12 +45,14 @@ export fn free(ptr_opt: ?*anyopaque) void {
             @memset(slice, undefined);
             allocator_instance.freeHuge(slice, 0, @returnAddress(), false);
         } else {
-            const heap = allocator_instance.getThreadHeap(ptr) orelse {
-                invalid("invalid free: {*} - no valid heap", .{ptr});
-                return;
-            };
+            if (build_options.panic_on_invalid) {
+                if (allocator_instance.getThreadHeap(ptr) == null) {
+                    invalid("invalid free: {*} - no valid heap", .{ptr});
+                    return;
+                }
+            }
 
-            allocator_instance.freeNonHugeFromHeap(heap, bytes_ptr, 0, @returnAddress());
+            allocator_instance.freeNonHuge(bytes_ptr, 0, @returnAddress());
         }
     }
 }

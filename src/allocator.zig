@@ -161,23 +161,23 @@ pub fn Allocator(comptime config: Config) type {
             }
             assert.withMessage(@src(), buf.len <= constants.max_slot_size_large_page, "tried to free unowned pointer");
 
-            const segment = Segment.ofPtr(buf.ptr);
-            const heap = segment.heap;
-
-            self.freeNonHugeFromHeap(heap, buf.ptr, log2_align, ret_addr);
+            self.freeNonHuge(buf.ptr, log2_align, ret_addr);
         }
 
-        pub fn freeNonHugeFromHeap(self: *Self, heap: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
-            log.debug("freeing non-huge allocation", .{});
-            if (config.safety_checks) if (!self.thread_heaps.ownsHeap(heap)) {
-                log.err("invalid free: {*} is not an owned heap", .{heap});
-                return;
-            };
+        pub fn freeNonHuge(self: *Self, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
+            log.debug("freeing non-huge allocation {*}", .{ptr});
 
             _ = log2_align;
             _ = ret_addr;
+
             const segment = Segment.ofPtr(ptr);
-            log.debugVerbose("deallocate in heap {*}: segment={*}, ptr={*}", .{ heap, segment, ptr });
+            const heap = segment.heap;
+            log.debugVerbose("free non-huge: heap {*}, segment={*}, ptr={*}", .{ heap, segment, ptr });
+
+            if (config.safety_checks) if (!self.thread_heaps.ownsHeap(heap)) {
+                log.err("invalid free: {*} is not part of an owned heap", .{ptr});
+                return;
+            };
 
             const page_index = segment.pageIndex(ptr);
             const page_node = &segment.pages[page_index];
