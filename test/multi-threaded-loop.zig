@@ -92,8 +92,8 @@ fn logFn(
     const prefix1 = "[Thread {?d}-{d}] ";
     const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     const stderr = std.io.getStdErr().writer();
-    std.debug.getStderrMutex().lock();
-    defer std.debug.getStderrMutex().unlock();
+    std.debug.lockStdErr();
+    defer std.debug.unlockStdErr();
     nosuspend stderr.print(
         prefix1 ++ level_txt ++ prefix2 ++ format ++ "\n",
         .{ thread_index, std.Thread.getCurrentId() } ++ args,
