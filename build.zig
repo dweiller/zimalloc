@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) void {
 
     const zimalloc_options = build_options.createModule();
     const zimalloc = b.addModule("zimalloc", .{
-        .root_source_file = .{ .path = "src/zimalloc.zig" },
+        .root_source_file = b.path("src/zimalloc.zig"),
         .imports = &.{
             .{ .name = "build_options", .module = zimalloc_options },
         },
@@ -79,7 +79,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/zimalloc.zig" },
+        .root_source_file = b.path("src/zimalloc.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -109,7 +109,7 @@ pub fn build(b: *std.Build) void {
         const test_exe = b.addExecutable(.{
             .name = exe_name,
             .target = target,
-            .root_source_file = .{ .path = b.pathJoin(&.{ "test", test_name }) },
+            .root_source_file = b.path(b.pathJoin(&.{ "test", test_name })),
             .optimize = optimize,
         });
         test_exe.root_module.addImport("zimalloc", zimalloc);
@@ -139,7 +139,7 @@ fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Co
     const libzimalloc = switch (options.linkage) {
         .dynamic => b.addSharedLibrary(.{
             .name = "zimalloc",
-            .root_source_file = .{ .path = "src/libzimalloc.zig" },
+            .root_source_file = b.path("src/libzimalloc.zig"),
             .version = libzimalloc_version,
             .target = options.target,
             .optimize = options.optimize,
@@ -148,7 +148,7 @@ fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Co
         }),
         .static => b.addStaticLibrary(.{
             .name = "zimalloc",
-            .root_source_file = .{ .path = "src/libzimalloc.zig" },
+            .root_source_file = b.path("src/libzimalloc.zig"),
             .version = libzimalloc_version,
             .target = options.target,
             .optimize = options.optimize,
