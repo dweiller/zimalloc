@@ -33,10 +33,32 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(bool, "panic_on_invalid", panic_on_invalid);
 
     const zimalloc_options = build_options.createModule();
+
+    const branch_hint_version: std.SemanticVersion = .{
+        .major = 0,
+        .minor = 14,
+        .patch = 0,
+        .pre = "0.14.0-dev.1402+cad65307b",
+        .build = "0.14.0-dev.1402+cad65307b",
+    };
+
+    const log_module_source = if (@import("builtin").zig_version.order(branch_hint_version) == .lt)
+        "src/log_setCold.zig"
+    else
+        "src/log_branchHint.zig";
+
+    const log_module = b.createModule(.{
+        .root_source_file = b.path(log_module_source),
+        .imports = &.{
+            .{ .name = "build_options", .module = zimalloc_options },
+        },
+    });
+
     const zimalloc = b.addModule("zimalloc", .{
         .root_source_file = b.path("src/zimalloc.zig"),
         .imports = &.{
             .{ .name = "build_options", .module = zimalloc_options },
+            .{ .name = "log", .module = log_module },
         },
     });
 
@@ -46,6 +68,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .zimalloc_options = zimalloc_options,
+        .log_module = log_module,
     });
 
     const libzimalloc_install = b.addInstallArtifact(libzimalloc, .{});
@@ -66,6 +89,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = config.optimize,
             .zimalloc_options = options_module,
+            .log_module = log_module,
         });
 
         const install = b.addInstallArtifact(compile, .{
@@ -85,6 +109,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     tests.root_module.addImport("build_options", zimalloc_options);
+    tests.root_module.addImport("log", log_module);
 
     const tests_run = b.addRunArtifact(tests);
 
@@ -132,6 +157,7 @@ const LibzimallocOptions = struct {
     zimalloc_options: *std.Build.Module,
     linkage: std.builtin.LinkMode = .dynamic,
     pic: ?bool = true,
+    log_module: *std.Build.Module,
 };
 
 fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Compile {
@@ -158,6 +184,7 @@ fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Co
     };
 
     libzimalloc.root_module.addImport("build_options", options.zimalloc_options);
+    libzimalloc.root_module.addImport("log", options.log_module);
     return libzimalloc;
 }
 

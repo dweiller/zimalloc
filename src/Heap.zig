@@ -53,7 +53,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(co
         return @ptrFromInt(aligned_address);
     }
 
-    if (isNullPageNode(page_node)) unlikely() else {
+    if (!isNullPageNode(page_node)) {
         page_node.data.migrateFreeList();
     }
 
@@ -65,7 +65,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(co
 
     log.debugVerbose("alloc slow path", .{});
     const slot = slot: {
-        if (isNullPageNode(page_node)) unlikely() else {
+        if (!isNullPageNode(page_node)) {
             var node = page_node.next;
             var prev = page_node;
             while (node != page_node) {
@@ -235,7 +235,6 @@ fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
 
     if (isNullPageNode(self.pages[class].head.?)) {
         // capcity == 0 means it's the null page
-        unlikely();
         self.pages[class].head = page_node;
     } else {
         self.pages[class].prependOne(page_node);
@@ -287,18 +286,12 @@ fn isNullPageNode(page_node: *const Page.List.Node) bool {
     return page_node == &null_page_list_node;
 }
 
-// TODO: replace this attempted workaround when https://github.com/ziglang/zig/issues/5177
-//       gets implemented
-fn unlikely() void {
-    @setCold(true);
-}
-
 const size_class_count = size_class.count;
 
 const std = @import("std");
 
 const assert = @import("assert.zig");
-const log = @import("log.zig");
+const log = @import("log");
 const constants = @import("constants.zig");
 
 const size_class = @import("size_class.zig");

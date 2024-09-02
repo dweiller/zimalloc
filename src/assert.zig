@@ -12,4 +12,4 @@ pub fn withMessage(src_loc: std.builtin.SourceLocation, ok: bool, message: []con
 }
 
 const std = @import("std");
-const log = @import("log.zig");
+const log = @import("log");

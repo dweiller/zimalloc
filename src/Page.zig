@@ -183,6 +183,6 @@ const std = @import("std");
 const assert = @import("assert.zig");
 const constants = @import("constants.zig");
 const list = @import("list.zig");
-const log = @import("log.zig");
+const log = @import("log");
 
 const Segment = @import("Segment.zig");
