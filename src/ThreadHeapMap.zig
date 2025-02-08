@@ -117,4 +117,4 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("Heap.zig");
-const log = @import("log");
+const log = @import("log.zig");
