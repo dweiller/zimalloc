@@ -375,7 +375,7 @@ const builtin = @import("builtin");
 
 const assert = @import("assert.zig");
 const constants = @import("constants.zig");
-const log = @import("log");
+const log = @import("log.zig");
 const huge_alignment = @import("huge_alignment.zig");
 
 const Heap = @import("Heap.zig");

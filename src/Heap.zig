@@ -291,7 +291,7 @@ const size_class_count = size_class.count;
 const std = @import("std");
 
 const assert = @import("assert.zig");
-const log = @import("log");
+const log = @import("log.zig");
 const constants = @import("constants.zig");
 
 const size_class = @import("size_class.zig");

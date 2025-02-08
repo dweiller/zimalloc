@@ -159,7 +159,7 @@ const std = @import("std");
 const zimalloc = @import("zimalloc.zig");
 
 const assert = @import("assert.zig");
-const log = @import("log");
+const log = @import("log.zig");
 const constants = @import("constants.zig");
 
 const build_options = @import("build_options");
