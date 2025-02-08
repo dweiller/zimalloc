@@ -80,10 +80,12 @@ pub fn build(b: *std.Build) void {
     }
 
     const tests = b.addTest(.{
-        .root_source_file = b.path("src/zimalloc.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/zimalloc.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
     });
     tests.root_module.addImport("build_options", zimalloc_options);
 
@@ -109,9 +111,11 @@ pub fn build(b: *std.Build) void {
         const exe_name = test_name[0 .. test_name.len - 4];
         const test_exe = b.addExecutable(.{
             .name = exe_name,
-            .target = target,
-            .root_source_file = b.path(b.pathJoin(&.{ "test", test_name })),
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.pathJoin(&.{ "test", test_name })),
+                .target = target,
+                .optimize = optimize,
+            }),
         });
         test_exe.root_module.addImport("zimalloc", zimalloc);
         test_exe.root_module.addOptions("build_options", standalone_options);
@@ -137,23 +141,25 @@ const LibzimallocOptions = struct {
 
 fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Compile {
     const libzimalloc_version = std.SemanticVersion{ .major = 0, .minor = 0, .patch = 0 };
+
+    const root_module = b.createModule(.{
+        .root_source_file = b.path("src/libzimalloc.zig"),
+        .target = options.target,
+        .optimize = options.optimize,
+        .link_libc = true,
+    });
+
     const libzimalloc = switch (options.linkage) {
         .dynamic => b.addSharedLibrary(.{
             .name = "zimalloc",
-            .root_source_file = b.path("src/libzimalloc.zig"),
+            .root_module = root_module,
             .version = libzimalloc_version,
-            .target = options.target,
-            .optimize = options.optimize,
-            .link_libc = true,
             .pic = options.pic,
         }),
         .static => b.addStaticLibrary(.{
             .name = "zimalloc",
-            .root_source_file = b.path("src/libzimalloc.zig"),
+            .root_module = root_module,
             .version = libzimalloc_version,
-            .target = options.target,
-            .optimize = options.optimize,
-            .link_libc = true,
             .pic = options.pic,
         }),
     };
