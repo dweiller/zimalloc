@@ -69,23 +69,23 @@ pub fn pageIndex(self: ConstPtr, ptr: *const anyopaque) usize {
     return (@intFromPtr(ptr) - @intFromPtr(self)) >> self.page_shift;
 }
 
-pub fn pageSlice(self: ConstPtr, index: usize) []align(std.mem.page_size) u8 {
+pub fn pageSlice(self: ConstPtr, index: usize) []align(std.heap.page_size_min) u8 {
     if (index == 0) {
         const segment_end = @intFromPtr(self) + @sizeOf(@This());
-        const address = std.mem.alignForward(usize, segment_end, std.mem.page_size);
+        const address = std.mem.alignForward(usize, segment_end, std.heap.page_size_min);
         const page_size = (@as(usize, 1) << self.page_shift) - segment_first_page_offset;
-        const bytes_ptr: [*]align(std.mem.page_size) u8 = @ptrFromInt(address);
+        const bytes_ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(address);
         return bytes_ptr[0..page_size];
     } else {
         assert.withMessage(@src(), self.page_shift == small_page_shift, "corrupt page_shift or index");
         const address = @intFromPtr(self) + index * small_page_size;
-        const bytes_ptr: [*]align(std.mem.page_size) u8 = @ptrFromInt(address);
+        const bytes_ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(address);
         return bytes_ptr[0..small_page_size];
     }
 }
 
 fn allocateSegment() ?*align(segment_alignment) [segment_size]u8 {
-    return if (huge_alignment.allocate(segment_size, segment_alignment)) |ptr|
+    return if (huge_alignment.allocate(segment_size, .fromByteUnits(segment_alignment))) |ptr|
         @alignCast(ptr[0..segment_size])
     else
         null;

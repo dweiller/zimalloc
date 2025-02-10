@@ -15,7 +15,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         const bytes_ptr: [*]u8 = @ptrCast(ptr);
         const old_slice = bytes_ptr[0..old_size];
 
-        if (allocator_instance.canResize(old_slice, 0, len, @returnAddress())) {
+        if (allocator_instance.canResize(old_slice, .@"1", len, @returnAddress())) {
             log.debug("keeping old pointer", .{});
             return ptr;
         }
@@ -26,7 +26,7 @@ export fn realloc(ptr_opt: ?*anyopaque, len: usize) ?*anyopaque {
         const copy_len = @min(len, old_slice.len);
         @memcpy(new_mem[0..copy_len], old_slice[0..copy_len]);
 
-        allocator_instance.deallocate(old_slice, 0, @returnAddress());
+        allocator_instance.deallocate(old_slice, .@"1", @returnAddress());
 
         log.debug("reallocated pointer: {*}", .{new_mem});
         return new_mem;
@@ -43,7 +43,7 @@ export fn free(ptr_opt: ?*anyopaque) void {
             assert.withMessage(@src(), size != 0, "BUG: huge allocation size should be > 0");
             const slice = bytes_ptr[0..size];
             @memset(slice, undefined);
-            allocator_instance.freeHuge(slice, 0, @returnAddress(), false);
+            allocator_instance.freeHuge(slice, .@"1", @returnAddress(), false);
         } else {
             if (build_options.panic_on_invalid) {
                 if (allocator_instance.getThreadHeap(ptr) == null) {
@@ -52,7 +52,7 @@ export fn free(ptr_opt: ?*anyopaque) void {
                 }
             }
 
-            allocator_instance.freeNonHuge(bytes_ptr, 0, @returnAddress());
+            allocator_instance.freeNonHuge(bytes_ptr, .@"1", @returnAddress());
         }
     }
 }
@@ -95,13 +95,13 @@ export fn memalign(alignment: usize, size: usize) ?*anyopaque {
 
 export fn valloc(size: usize) ?*anyopaque {
     log.debug("valloc {d}", .{size});
-    return allocateBytes(size, std.mem.page_size, @returnAddress(), false, false, true);
+    return allocateBytes(size, std.heap.page_size_min, @returnAddress(), false, false, true);
 }
 
 export fn pvalloc(size: usize) ?*anyopaque {
     log.debug("pvalloc {d}", .{size});
-    const aligned_size = std.mem.alignForward(usize, size, std.mem.page_size);
-    return allocateBytes(aligned_size, std.mem.page_size, @returnAddress(), false, false, true);
+    const aligned_size = std.mem.alignForward(usize, size, std.heap.page_size_min);
+    return allocateBytes(aligned_size, std.heap.page_size_min, @returnAddress(), false, false, true);
 }
 
 export fn malloc_usable_size(ptr_opt: ?*anyopaque) usize {
@@ -114,7 +114,7 @@ export fn malloc_usable_size(ptr_opt: ?*anyopaque) usize {
 
 fn allocateBytes(
     byte_count: usize,
-    alignment: usize,
+    alignment_bytes: usize,
     ret_addr: usize,
     comptime zero: bool,
     comptime check_alignment: bool,
@@ -124,15 +124,15 @@ fn allocateBytes(
 
     if (check_alignment) {
         if (!set_errno) @compileError("check_alignment requires set_errno to be true");
-        if (!std.mem.isValidAlign(alignment)) {
-            invalid("invalid alignment: {d}", .{alignment});
+        if (!std.mem.isValidAlign(alignment_bytes)) {
+            invalid("invalid alignment: {d}", .{alignment_bytes});
             setErrno(.INVAL);
             return null;
         }
     }
 
-    const log2_align = std.math.log2_int(usize, alignment);
-    if (allocator_instance.allocate(byte_count, log2_align, ret_addr)) |ptr| {
+    const alignment: std.mem.Alignment = .fromByteUnits(alignment_bytes);
+    if (allocator_instance.allocate(byte_count, alignment, ret_addr)) |ptr| {
         @memset(ptr[0..byte_count], if (zero) 0 else undefined);
         log.debug("allocated {*}", .{ptr});
         return ptr;
