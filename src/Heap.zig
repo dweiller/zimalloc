@@ -30,17 +30,22 @@ pub fn allocator(self: *Heap) std.mem.Allocator {
         .vtable = &.{
             .alloc = alloc,
             .resize = resize,
+            .remap = remap,
             .free = free,
         },
     };
 }
 
-pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(constants.min_slot_alignment) u8 {
+pub fn allocateSizeClass(
+    self: *Heap,
+    class: usize,
+    alignment: Alignment,
+) ?[*]align(constants.min_slot_alignment) u8 {
     assert.withMessage(@src(), class < size_class_count, "requested size class is too big");
 
     log.debugVerbose(
-        "allocateSizeClass: size class={d}, log2_align={d}",
-        .{ class, log2_align },
+        "allocateSizeClass: size class={d}, alignment={d}",
+        .{ class, alignment.toByteUnits() },
     );
 
     const page_list = &self.pages[class];
@@ -49,7 +54,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(co
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc fast path", .{});
-        const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
+        const aligned_address = alignment.forward(@intFromPtr(buf.ptr));
         return @ptrFromInt(aligned_address);
     }
 
@@ -59,7 +64,7 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(co
 
     if (page_node.data.allocSlotFast()) |buf| {
         log.debugVerbose("alloc slow path (first page)", .{});
-        const aligned_address = std.mem.alignForwardLog2(@intFromPtr(buf.ptr), log2_align);
+        const aligned_address = alignment.forward(@intFromPtr(buf.ptr));
         return @ptrFromInt(aligned_address);
     }
 
@@ -96,18 +101,23 @@ pub fn allocateSizeClass(self: *Heap, class: usize, log2_align: u8) ?[*]align(co
         const new_page = self.initPage(class) catch return null;
         break :slot new_page.data.allocSlotFast().?;
     };
-    const aligned_address = std.mem.alignForwardLog2(@intFromPtr(slot.ptr), log2_align);
+    const aligned_address = alignment.forward(@intFromPtr(slot.ptr));
     return @ptrFromInt(aligned_address);
 }
 
-pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?[*]align(constants.min_slot_alignment) u8 {
+pub fn allocate(
+    self: *Heap,
+    len: usize,
+    alignment: Alignment,
+    ret_addr: usize,
+) ?[*]align(constants.min_slot_alignment) u8 {
     _ = ret_addr;
     log.debugVerbose(
-        "allocate: len={d}, log2_align={d}",
-        .{ len, log2_align },
+        "allocate: len={d}, alignment={d}",
+        .{ len, alignment.toByteUnits() },
     );
 
-    const slot_size = requiredSlotSize(len, log2_align);
+    const slot_size = requiredSlotSize(len, alignment);
 
     assert.withMessage(
         @src(),
@@ -117,32 +127,40 @@ pub fn allocate(self: *Heap, len: usize, log2_align: u8, ret_addr: usize) ?[*]al
 
     const class = sizeClass(slot_size);
 
-    return self.allocateSizeClass(class, log2_align);
+    return self.allocateSizeClass(class, alignment);
 }
 
-pub fn requiredSlotSize(len: usize, log2_align: u8) usize {
+pub fn requiredSlotSize(len: usize, alignment: Alignment) usize {
     const next_size = indexToSize(sizeClass(len));
     const next_size_log2_align = @ctz(next_size);
 
-    return if (log2_align <= next_size_log2_align)
+    return if (@intFromEnum(alignment) <= next_size_log2_align)
         len
-    else blk: {
-        const alignment = @as(usize, 1) << @intCast(log2_align);
-        break :blk len + alignment - 1;
-    };
+    else
+        len + alignment.toByteUnits() - 1;
 }
 
-pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+pub fn canResizeInPlace(
+    self: *Heap,
+    buf: []u8,
+    alignment: Alignment,
+    new_len: usize,
+    ret_addr: usize,
+) bool {
     _ = self;
     _ = ret_addr;
     log.debugVerbose(
-        "canResizeInPlace: buf.ptr={*}, buf.len={d}, log2_align={d}, new_len={d}",
-        .{ buf.ptr, buf.len, log2_align, new_len },
+        "canResizeInPlace: buf.ptr={*}, buf.len={d}, alignment={d}, new_len={d}",
+        .{ buf.ptr, buf.len, alignment.toByteUnits(), new_len },
     );
 
     const segment = Segment.ofPtr(buf.ptr);
     const page_index = segment.pageIndex(buf.ptr);
-    assert.withMessage(@src(), segment.init_set.isSet(page_index), "segment init_set corrupt with resizing");
+    assert.withMessage(
+        @src(),
+        segment.init_set.isSet(page_index),
+        "segment init_set corrupt with resizing",
+    );
     const page_node = &(segment.pages[page_index]);
     const page = &page_node.data;
     const slot = page.containingSlotSegment(segment, buf.ptr);
@@ -150,9 +168,9 @@ pub fn canResizeInPlace(self: *Heap, buf: []u8, log2_align: u8, new_len: usize, 
 }
 
 //  behaviour is undefined if `self` does not own `buf.ptr`.
-pub fn deallocate(self: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void {
+pub fn deallocate(self: *Heap, ptr: [*]u8, alignment: Alignment, ret_addr: usize) void {
     _ = self;
-    _ = log2_align;
+    _ = alignment;
     _ = ret_addr;
     const segment = Segment.ofPtr(ptr);
     log.debugVerbose("Heap.deallocate in {*}: ptr={*}", .{ segment, ptr });
@@ -166,19 +184,23 @@ pub fn deallocate(self: *Heap, ptr: [*]u8, log2_align: u8, ret_addr: usize) void
     page.freeLocalAligned(slot);
 }
 
-fn alloc(ctx: *anyopaque, len: usize, log2_align: u8, ret_addr: usize) ?[*]u8 {
+fn alloc(ctx: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
     const self: *@This() = @ptrCast(@alignCast(ctx));
-    return self.allocate(len, log2_align, ret_addr);
+    return self.allocate(len, alignment, ret_addr);
 }
 
-fn resize(ctx: *anyopaque, buf: []u8, log2_align: u8, new_len: usize, ret_addr: usize) bool {
+fn resize(ctx: *anyopaque, buf: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
     const self: *@This() = @ptrCast(@alignCast(ctx));
-    return self.canResizeInPlace(buf, log2_align, new_len, ret_addr);
+    return self.canResizeInPlace(buf, alignment, new_len, ret_addr);
 }
 
-fn free(ctx: *anyopaque, buf: []u8, log2_align: u8, ret_addr: usize) void {
+fn remap(ctx: *anyopaque, buf: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+    return if (resize(ctx, buf, alignment, new_len, ret_addr)) buf.ptr else null;
+}
+
+fn free(ctx: *anyopaque, buf: []u8, alignment: Alignment, ret_addr: usize) void {
     const self: *@This() = @ptrCast(@alignCast(ctx));
-    self.deallocate(buf.ptr, log2_align, ret_addr);
+    self.deallocate(buf.ptr, alignment, ret_addr);
 }
 
 fn getSegmentWithEmptySlot(self: *Heap, slot_size: u32) ?Segment.Ptr {
@@ -211,7 +233,11 @@ fn initNewSegmentForSlotSize(self: *Heap, slot_size: u32) !Segment.Ptr {
 fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
     const slot_size = indexToSize(class);
 
-    assert.withMessage(@src(), slot_size <= constants.max_slot_size_large_page, "slot size of requested class too large");
+    assert.withMessage(
+        @src(),
+        slot_size <= constants.max_slot_size_large_page,
+        "slot size of requested class too large",
+    );
 
     const segment: Segment.Ptr = self.getSegmentWithEmptySlot(slot_size) orelse
         try self.initNewSegmentForSlotSize(slot_size);
@@ -289,6 +315,7 @@ fn isNullPageNode(page_node: *const Page.List.Node) bool {
 const size_class_count = size_class.count;
 
 const std = @import("std");
+const Alignment = std.mem.Alignment;
 
 const assert = @import("assert.zig");
 const log = @import("log.zig");
@@ -333,7 +360,7 @@ test "slot alignment" {
     defer heap.deinit();
 
     for (0..size_class_count) |class| {
-        const ptr = heap.allocateSizeClass(class, 0) orelse {
+        const ptr = heap.allocateSizeClass(class, .@"1") orelse {
             log.err("failed to allocate size class {d}", .{class});
             return error.BadSizeClass;
         };
@@ -341,12 +368,12 @@ test "slot alignment" {
         try std.testing.expect(@ctz(indexToSize(class)) <= actual_log2_align);
     }
     for (0..size_class_count) |class| {
-        const log2_align = @ctz(indexToSize(class));
-        const ptr = heap.allocateSizeClass(class, log2_align) orelse {
+        const alignment: Alignment = @enumFromInt(@ctz(indexToSize(class)));
+        const ptr = heap.allocateSizeClass(class, alignment) orelse {
             log.err("failed to allocate size class {d}", .{class});
             return error.BadSizeClass;
         };
-        try std.testing.expect(std.mem.isAlignedLog2(@intFromPtr(ptr), log2_align));
+        try std.testing.expect(alignment.check(@intFromPtr(ptr)));
     }
 }
 
@@ -358,8 +385,11 @@ test "allocate with larger alignment" {
         const size = indexToSize(class);
         const slot_log2_align = @ctz(size);
         for (0..slot_log2_align) |log2_align| {
-            const ptr = heap.allocate(size, @intCast(log2_align), 0) orelse {
-                log.err("failed to allocate size {d} with log2_align {d} (class {d})", .{ size, log2_align, class });
+            const alignment: Alignment = @enumFromInt(log2_align);
+            const ptr = heap.allocate(size, alignment, 0) orelse {
+                log.err("failed to allocate size {d} with log2_align {d} (class {d})", .{
+                    size, log2_align, class,
+                });
                 return error.BadSizeClass;
             };
             const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(ptr)));
@@ -371,8 +401,10 @@ test "allocate with larger alignment" {
         const size = indexToSize(class) / 2;
         const slot_log2_align = @ctz(size);
         const log2_align = slot_log2_align + 1;
-        const ptr = heap.allocate(size, @intCast(log2_align), 0) orelse {
-            log.err("failed to allocate size {d} with log2_align {d} (class {d})", .{ size, log2_align, class });
+        const ptr = heap.allocate(size, @enumFromInt(log2_align), 0) orelse {
+            log.err("failed to allocate size {d} with log2_align {d} (class {d})", .{
+                size, log2_align, class,
+            });
             return error.BadSizeClass;
         };
         const actual_log2_align: std.math.Log2Int(usize) = @intCast(@ctz(@intFromPtr(ptr)));

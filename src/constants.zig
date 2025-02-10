@@ -5,7 +5,7 @@ pub const small_page_size = 1 << 16; // 64 KiB
 pub const small_page_count = segment_size / small_page_size;
 
 pub const segment_metadata_bytes = @sizeOf(@import("Segment.zig"));
-pub const segment_first_page_offset = std.mem.alignForward(usize, segment_metadata_bytes, std.mem.page_size);
+pub const segment_first_page_offset = std.mem.alignForward(usize, segment_metadata_bytes, std.heap.page_size_min);
 pub const small_page_size_first = small_page_size - segment_first_page_offset;
 
 pub const small_page_shift = std.math.log2(small_page_size);

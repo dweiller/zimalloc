@@ -22,8 +22,10 @@ comptime {
     }
 }
 
-pub fn init(self: *Page, slot_size: u32, bytes: []align(std.mem.page_size) u8) void {
-    log.debug("initialising page with slot size {d} at {*} ({d} bytes)", .{ slot_size, bytes.ptr, bytes.len });
+pub fn init(self: *Page, slot_size: u32, bytes: []align(std.heap.page_size_min) u8) void {
+    log.debug("initialising page with slot size {d} at {*} ({d} bytes)", .{
+        slot_size, bytes.ptr, bytes.len,
+    });
     const first_slot_address = firstSlotAddress(@intFromPtr(bytes.ptr), slot_size);
     const offset = first_slot_address - @intFromPtr(bytes.ptr);
     const capacity: u16 = @intCast((bytes.len - offset) / slot_size);
@@ -152,7 +154,11 @@ pub fn containingSlotSegment(self: *const Page, segment: Segment.Ptr, ptr: *cons
 }
 
 pub fn freeLocalAligned(self: *Page, slot: Slot) void {
-    assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free local slot not in the page");
+    assert.withMessage(
+        @src(),
+        self.containingSlot(slot.ptr).ptr == slot.ptr,
+        "tried to free local slot not in the page",
+    );
     assert.withMessage(@src(), self.used_count > 0, "tried to free local slot while used_count is 0");
 
     const node_ptr: *FreeList.Node = @ptrCast(slot);
@@ -161,7 +167,11 @@ pub fn freeLocalAligned(self: *Page, slot: Slot) void {
 }
 
 pub fn freeOtherAligned(self: *Page, slot: Slot) void {
-    assert.withMessage(@src(), self.containingSlot(slot.ptr).ptr == slot.ptr, "tried to free foreign slot not in the page");
+    assert.withMessage(
+        @src(),
+        self.containingSlot(slot.ptr).ptr == slot.ptr,
+        "tried to free foreign slot not in the page",
+    );
     assert.withMessage(@src(), self.used_count > 0, "tried to free foreign slot while used_count is 0");
 
     const node: *FreeList.Node = @ptrCast(slot);
