@@ -1,5 +1,6 @@
 .{
-    .name = "zimalloc",
+    .name = .zimalloc,
+    .fingerprint = 0x5047240b79716965,
     .version = "0.0.0",
     .paths = .{
         "build.zig.zon",
