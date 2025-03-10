@@ -78,6 +78,7 @@ fn run(index: usize, wg: *std.Thread.WaitGroup, semaphore: *std.Thread.Semaphore
 
 pub const std_options: std.Options = .{
     .logFn = logFn,
+    .log_level = .err,
 };
 
 fn logFn(
