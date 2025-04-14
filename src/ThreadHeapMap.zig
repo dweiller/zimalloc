@@ -4,12 +4,13 @@ pool: Pool = Pool.init(std.heap.page_allocator),
 
 const ThreadHeapMap = @This();
 
-const List = std.DoublyLinkedList(Entry);
-const Pool = std.heap.MemoryPool(List.Node);
+const List = std.DoublyLinkedList;
+const Pool = std.heap.MemoryPool(Entry);
 
 pub const Entry = struct {
     heap: Heap,
     thread_id: std.Thread.Id,
+    node: List.Node,
 };
 
 pub fn deinit(self: *ThreadHeapMap) void {
@@ -24,14 +25,16 @@ pub fn initThreadHeap(self: *ThreadHeapMap, thread_id: std.Thread.Id) ?*Entry {
     self.lock.lock();
     defer self.lock.unlock();
 
-    const node = self.pool.create() catch return null;
-    node.* = .{
-        .data = .{ .heap = Heap.init(), .thread_id = thread_id },
+    const entry = self.pool.create() catch return null;
+    entry.* = .{
+        .heap = Heap.init(),
+        .thread_id = thread_id,
+        .node = .{},
     };
 
-    self.list.prepend(node);
+    self.list.prepend(&entry.node);
 
-    return &node.data;
+    return entry;
 }
 
 /// behaviour is undefined if `thread_id` is not present in the map
@@ -41,8 +44,7 @@ pub fn deinitThread(self: *ThreadHeapMap, thread_id: std.Thread.Id) void {
     while (iter.next()) |entry| {
         if (entry.thread_id == thread_id) {
             entry.heap.deinit();
-            const node: *List.Node = @fieldParentPtr("data", entry);
-            self.list.remove(node);
+            self.list.remove(&entry.node);
             return;
         }
     }
@@ -99,7 +101,7 @@ fn BaseIterator(comptime NodeType: type, comptime EntryType: type, comptime kind
 
         pub fn next(self: *@This()) ?EntryType {
             const node = self.current orelse return null;
-            const result: EntryType = &node.data;
+            const result: EntryType = @fieldParentPtr("node", node);
             self.current = node.next;
             return result;
         }

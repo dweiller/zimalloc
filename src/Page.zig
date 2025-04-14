@@ -11,7 +11,7 @@ const Page = @This();
 pub const SlotCountInt = std.math.IntFittingRange(0, constants.small_page_size / @sizeOf(usize));
 
 pub const List = list.Circular(Page);
-pub const FreeList = std.SinglyLinkedList(void);
+const FreeList = std.SinglyLinkedList;
 
 comptime {
     if (@sizeOf(FreeList.Node) > constants.min_slot_size) {
@@ -45,7 +45,7 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.heap.page_size_min) 
         slot_index -= 1;
         const slot = slotAtIndex(first_slot_address, slot_index, slot_size);
         const node_ptr: *FreeList.Node = @alignCast(@ptrCast(slot));
-        node_ptr.* = .{ .next = null, .data = {} };
+        node_ptr.next = null;
 
         self.alloc_free_list.prepend(node_ptr);
     }
