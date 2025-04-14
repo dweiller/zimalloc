@@ -92,14 +92,9 @@ pub fn Allocator(comptime config: Config) type {
 
             log.debugVerbose("obtaining shared thread heaps lock", .{});
 
-            var iter = self.thread_heaps.iterator(.shared);
-            while (iter.next()) |data| {
-                if (data.thread_id == thread_id) {
-                    iter.unlock();
-                    return self.allocInHeap(&data.heap, len, alignment, ret_addr);
-                }
+            if (self.thread_heaps.get(thread_id)) |heap| {
+                return self.allocInHeap(heap, len, alignment, ret_addr);
             } else {
-                iter.unlock();
                 const heap = self.initHeapForThread() orelse return null;
                 return self.allocInHeap(heap, len, alignment, ret_addr);
             }

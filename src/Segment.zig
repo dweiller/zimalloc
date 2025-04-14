@@ -3,8 +3,7 @@ init_set: PageBitSet,
 pages: [small_page_count]Page,
 page_count: u32,
 heap: *Heap,
-next: ?Ptr,
-prev: ?Ptr,
+node: std.DoublyLinkedList.Node,
 
 pub const Ptr = *align(segment_alignment) @This();
 pub const ConstPtr = *align(segment_alignment) const @This();
@@ -41,8 +40,7 @@ pub fn init(heap: *Heap, page_size: PageSize) ?Ptr {
                 .page_count = small_page_count,
                 .init_set = PageBitSet.initEmpty(),
                 .heap = heap,
-                .next = null,
-                .prev = null,
+                .node = .{},
             };
         },
         .large => {
@@ -52,8 +50,7 @@ pub fn init(heap: *Heap, page_size: PageSize) ?Ptr {
                 .page_count = 1,
                 .init_set = PageBitSet.initEmpty(),
                 .heap = heap,
-                .next = null,
-                .prev = null,
+                .node = .{},
             };
         },
     }

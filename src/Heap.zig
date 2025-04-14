@@ -1,7 +1,5 @@
 pages: [size_class_count]list.Circular,
-// TODO: Not using ?Segment.Ptr is a workaroiund for a compiler issue.
-//       Revert this when possible, see github.com/dweiller/zimalloc/issues/15
-segments: ?*align(constants.segment_alignment) Segment,
+segments: ?*std.DoublyLinkedList.Node,
 
 const Heap = @This();
 
@@ -17,9 +15,8 @@ pub fn init() Heap {
 }
 
 pub fn deinit(self: *Heap) void {
-    var segment_iter = self.segments;
-    while (segment_iter) |segment| {
-        segment_iter = segment.next;
+    var iter = self.iterateSegments();
+    while (iter.next()) |segment| {
         segment.deinit();
     }
 }
@@ -33,6 +30,12 @@ pub fn allocator(self: *Heap) std.mem.Allocator {
             .remap = remap,
             .free = free,
         },
+    };
+}
+
+pub fn iterateSegments(self: *Heap) list.Iterator(*std.DoublyLinkedList.Node, Segment.Ptr, "node") {
+    return .{
+        .node = self.segments,
     };
 }
 
@@ -205,12 +208,12 @@ fn free(ctx: *anyopaque, buf: []u8, alignment: Alignment, ret_addr: usize) void 
 }
 
 fn getSegmentWithEmptySlot(self: *Heap, slot_size: u32) ?Segment.Ptr {
-    var segment_iter = self.segments;
-    while (segment_iter) |node| : (segment_iter = node.next) {
-        const page_size = @as(usize, 1) << node.page_shift;
+    var iter = self.iterateSegments();
+    while (iter.next()) |segment| {
+        const page_size = @as(usize, 1) << segment.page_shift;
         const segment_max_slot_size = page_size / constants.min_slots_per_page;
-        if (node.init_set.count() < node.page_count and segment_max_slot_size >= slot_size) {
-            return node;
+        if (segment.init_set.count() < segment.page_count and segment_max_slot_size >= slot_size) {
+            return segment;
         }
     }
     return null;
@@ -218,15 +221,15 @@ fn getSegmentWithEmptySlot(self: *Heap, slot_size: u32) ?Segment.Ptr {
 
 fn initNewSegmentForSlotSize(self: *Heap, slot_size: u32) !Segment.Ptr {
     const page_size = Segment.pageSize(slot_size);
-    const segment = Segment.init(self, page_size) orelse
-        return error.OutOfMemory;
-    if (self.segments) |orig_head| {
-        assert.withMessage(@src(), orig_head.prev == null, "segment list head is currupt");
-        orig_head.prev = segment;
+    const segment = Segment.init(self, page_size) orelse return error.OutOfMemory;
+    if (self.segments) |node| {
+        const head: Segment.Ptr = @alignCast(@fieldParentPtr("node", node));
+        assert.withMessage(@src(), head.node.prev == null, "segment list head is currupt");
+        head.node.prev = &segment.node;
     }
     log.debug("initialised new segment {*} with {s} pages", .{ segment, @tagName(page_size) });
-    segment.next = self.segments;
-    self.segments = segment;
+    segment.node.next = self.segments;
+    self.segments = &segment.node;
     return segment;
 }
 
@@ -284,11 +287,11 @@ fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
     assert.withMessage(@src(), self.segments != null, "heap owns no segments");
 
     log.debug("releasing segment {*}", .{segment});
-    if (self.segments.? == segment) {
-        self.segments = segment.next;
+    if (self.segments.? == &segment.node) {
+        self.segments = segment.node.next;
     }
-    if (segment.prev) |prev| prev.next = segment.next;
-    if (segment.next) |next| next.prev = segment.prev;
+    if (segment.node.prev) |prev| prev.next = segment.node.next;
+    if (segment.node.next) |next| next.prev = segment.node.prev;
     segment.deinit();
 }
 

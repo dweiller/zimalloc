@@ -92,6 +92,19 @@ pub const Circular = struct {
     }
 };
 
+pub fn Iterator(comptime Node: type, comptime T: type, comptime field_name: []const u8) type {
+    return struct {
+        node: ?Node,
+
+        pub fn next(self: *@This()) ?T {
+            const node = self.node orelse return null;
+            const data: T = @alignCast(@fieldParentPtr(field_name, node));
+            self.node = node.next;
+            return data;
+        }
+    };
+}
+
 const std = @import("std");
 
 const assert = @import("assert.zig");

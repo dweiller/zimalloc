@@ -50,6 +50,17 @@ pub fn deinitThread(self: *ThreadHeapMap, thread_id: std.Thread.Id) void {
     }
 }
 
+pub fn get(self: *ThreadHeapMap, thread_id: std.Thread.Id) ?*Heap {
+    var iter = self.iterator(.shared);
+    defer iter.unlock();
+    while (iter.next()) |data| {
+        if (data.thread_id == thread_id) {
+            return &data.heap;
+        }
+    }
+    return null;
+}
+
 pub fn ownsHeap(self: *ThreadHeapMap, heap: *const Heap) bool {
     var iter = self.constIterator(.shared);
     defer iter.unlock();
