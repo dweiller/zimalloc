@@ -195,8 +195,7 @@ pub fn Allocator(comptime config: Config) type {
             };
 
             const page_index = segment.pageIndex(ptr);
-            const page_node = &segment.pages[page_index];
-            const page = &page_node.data;
+            const page = &segment.pages[page_index];
             const slot = page.containingSlotSegment(segment, ptr);
 
             const thread_id = @as(*ThreadHeapMap.Entry, @fieldParentPtr("heap", heap)).thread_id;
@@ -248,8 +247,7 @@ pub fn Allocator(comptime config: Config) type {
             };
 
             const page_index = segment.pageIndex(ptr);
-            const page_node = &segment.pages[page_index];
-            const page = &page_node.data;
+            const page = &segment.pages[page_index];
             const slot = page.containingSlotSegment(segment, ptr);
             const offset = @intFromPtr(ptr) - @intFromPtr(slot.ptr);
             return slot.len - offset;

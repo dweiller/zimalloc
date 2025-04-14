@@ -1,4 +1,4 @@
-pages: [size_class_count]Page.List,
+pages: [size_class_count]list.Circular,
 // TODO: Not using ?Segment.Ptr is a workaroiund for a compiler issue.
 //       Revert this when possible, see github.com/dweiller/zimalloc/issues/15
 segments: ?*align(constants.segment_alignment) Segment,
@@ -11,7 +11,7 @@ pub fn init() Heap {
         // list is null before any operation that may modify it or try to access the next/prev pages
         // as these pointers are undefined. Use of @constCast here should be safe as long as
         // `isNullPageNode()` is used to check before any modifications are attempted.
-        .pages = .{Page.List{ .head = @constCast(&null_page_list_node) }} ** size_class_count,
+        .pages = .{list.Circular{ .head = @constCast(null_page_list_node) }} ** size_class_count,
         .segments = null,
     };
 }
@@ -52,17 +52,19 @@ pub fn allocateSizeClass(
     // page_list.head is guaranteed non-null (see init())
     const page_node = page_list.head.?;
 
-    if (page_node.data.allocSlotFast()) |buf| {
+    const head_page: *Page = @fieldParentPtr("node", page_node);
+
+    if (head_page.allocSlotFast()) |buf| {
         log.debugVerbose("alloc fast path", .{});
         const aligned_address = alignment.forward(@intFromPtr(buf.ptr));
         return @ptrFromInt(aligned_address);
     }
 
     if (!isNullPageNode(page_node)) {
-        page_node.data.migrateFreeList();
+        head_page.migrateFreeList();
     }
 
-    if (page_node.data.allocSlotFast()) |buf| {
+    if (head_page.allocSlotFast()) |buf| {
         log.debugVerbose("alloc slow path (first page)", .{});
         const aligned_address = alignment.forward(@intFromPtr(buf.ptr));
         return @ptrFromInt(aligned_address);
@@ -74,18 +76,19 @@ pub fn allocateSizeClass(
             var node = page_node.next;
             var prev = page_node;
             while (node != page_node) {
-                node.data.migrateFreeList();
-                const other_freed = @atomicLoad(Page.SlotCountInt, &node.data.other_freed, .unordered);
-                const in_use_count = node.data.used_count - other_freed;
+                const page: *Page = @fieldParentPtr("node", node);
+                page.migrateFreeList();
+                const other_freed = @atomicLoad(Page.SlotCountInt, &page.other_freed, .unordered);
+                const in_use_count = page.used_count - other_freed;
                 if (in_use_count == 0) {
-                    deinitPage(node, page_list) catch |err|
+                    deinitPage(page, page_list) catch |err|
                         log.warn("could not madvise page: {s}", .{@errorName(err)});
                     node = prev.next; // deinitPage changed prev.next to node.next
                     const segment = Segment.ofPtr(node);
                     if (segment.init_set.count() == 0) {
                         self.releaseSegment(segment);
                     }
-                } else if (node.data.allocSlotFast()) |slot| {
+                } else if (page.allocSlotFast()) |slot| {
                     log.debugVerbose("found suitable page with empty slot at {*}", .{slot.ptr});
                     // rotate page list
                     page_list.head = node;
@@ -99,7 +102,7 @@ pub fn allocateSizeClass(
 
         log.debugVerbose("no suitable pre-existing page found", .{});
         const new_page = self.initPage(class) catch return null;
-        break :slot new_page.data.allocSlotFast().?;
+        break :slot new_page.allocSlotFast().?;
     };
     const aligned_address = alignment.forward(@intFromPtr(slot.ptr));
     return @ptrFromInt(aligned_address);
@@ -161,8 +164,7 @@ pub fn canResizeInPlace(
         segment.init_set.isSet(page_index),
         "segment init_set corrupt with resizing",
     );
-    const page_node = &(segment.pages[page_index]);
-    const page = &page_node.data;
+    const page = &(segment.pages[page_index]);
     const slot = page.containingSlotSegment(segment, buf.ptr);
     return @intFromPtr(buf.ptr) + new_len <= @intFromPtr(slot.ptr) + slot.len;
 }
@@ -176,8 +178,7 @@ pub fn deallocate(self: *Heap, ptr: [*]u8, alignment: Alignment, ret_addr: usize
     log.debugVerbose("Heap.deallocate in {*}: ptr={*}", .{ segment, ptr });
 
     const page_index = segment.pageIndex(ptr);
-    const page_node = &segment.pages[page_index];
-    const page = &page_node.data;
+    const page = &segment.pages[page_index];
     const slot = page.containingSlotSegment(segment, ptr);
 
     log.debugVerbose("moving slot {*} to local freelist", .{slot.ptr});
@@ -230,7 +231,7 @@ fn initNewSegmentForSlotSize(self: *Heap, slot_size: u32) !Segment.Ptr {
 }
 
 /// asserts that `slot_size <= max_slot_size_large_page`
-fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
+fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page {
     const slot_size = indexToSize(class);
 
     assert.withMessage(
@@ -248,10 +249,9 @@ fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
     };
     assert.withMessage(@src(), index < segment.page_count, "segment init_set is corrupt");
 
-    var page_node = &segment.pages[index];
-    page_node.next = page_node;
-    page_node.prev = page_node;
-    const page = &page_node.data;
+    var page = &segment.pages[index];
+    page.node.next = &page.node;
+    page.node.prev = &page.node;
     log.debug(
         "initialising page {d} with slot size {d} in segment {*}",
         .{ index, slot_size, segment },
@@ -261,23 +261,23 @@ fn initPage(self: *Heap, class: usize) error{OutOfMemory}!*Page.List.Node {
 
     if (isNullPageNode(self.pages[class].head.?)) {
         // capcity == 0 means it's the null page
-        self.pages[class].head = page_node;
+        self.pages[class].head = &page.node;
     } else {
-        self.pages[class].prependOne(page_node);
+        self.pages[class].prependOne(&page.node);
     }
-    return page_node;
+    return page;
 }
 
 fn deinitPage(
-    page_node: *Page.List.Node,
-    page_list: *Page.List,
+    page: *Page,
+    page_list: *list.Circular,
 ) !void {
     assert.withMessage(@src(), page_list.head != null, "page list is empty");
 
-    page_list.remove(page_node);
+    page_list.remove(&page.node);
 
-    defer page_node.* = undefined;
-    try page_node.data.deinit();
+    defer page.* = undefined;
+    try page.deinit();
 }
 
 fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
@@ -294,22 +294,21 @@ fn releaseSegment(self: *Heap, segment: Segment.Ptr) void {
 
 // this is used to represent an uninitialised page list so we can avoid
 // a branch in the fast allocation path
-const null_page_list_node = Page.List.Node{
-    .data = Page{
-        .local_free_list = .{ .first = null },
-        .alloc_free_list = .{ .first = null },
-        .other_free_list = .{ .first = null },
-        .used_count = 0,
-        .other_freed = 0,
-        .capacity = 0,
-        .slot_size = 0,
-    },
-    .next = undefined,
-    .prev = undefined,
+const null_page: Page = .{
+    .local_free_list = .{ .first = null },
+    .alloc_free_list = .{ .first = null },
+    .other_free_list = .{ .first = null },
+    .used_count = 0,
+    .other_freed = 0,
+    .capacity = 0,
+    .slot_size = 0,
+    .node = undefined,
 };
 
-fn isNullPageNode(page_node: *const Page.List.Node) bool {
-    return page_node == &null_page_list_node;
+const null_page_list_node = &null_page.node;
+
+fn isNullPageNode(page_node: *const list.Circular.Node) bool {
+    return page_node == null_page_list_node;
 }
 
 const size_class_count = size_class.count;
@@ -318,6 +317,7 @@ const std = @import("std");
 const Alignment = std.mem.Alignment;
 
 const assert = @import("assert.zig");
+const list = @import("list.zig");
 const log = @import("log.zig");
 const constants = @import("constants.zig");
 

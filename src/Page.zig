@@ -5,12 +5,12 @@ used_count: SlotCountInt,
 other_freed: SlotCountInt,
 capacity: u16, // number of slots
 slot_size: u32,
+node: list.Circular.Node,
 
 const Page = @This();
 
 pub const SlotCountInt = std.math.IntFittingRange(0, constants.small_page_size / @sizeOf(usize));
 
-pub const List = list.Circular(Page);
 const FreeList = std.SinglyLinkedList;
 
 comptime {
@@ -38,6 +38,7 @@ pub fn init(self: *Page, slot_size: u32, bytes: []align(std.heap.page_size_min) 
         .other_freed = 0,
         .capacity = capacity,
         .slot_size = slot_size,
+        .node = .{ .next = &self.node, .prev = &self.node },
     };
     // initialise free list
     var slot_index = capacity;
@@ -56,7 +57,7 @@ pub fn deinit(self: *Page) !void {
     const ptr_in_page = self.getPtrInFreeSlot();
 
     const page_index = segment.pageIndex(ptr_in_page);
-    assert.withMessage(@src(), &segment.pages[page_index].data == self, "freelists are corrupt");
+    assert.withMessage(@src(), &segment.pages[page_index] == self, "freelists are corrupt");
 
     log.debug("deiniting page {d} in segment {*}", .{ page_index, segment });
     segment.init_set.unset(page_index);

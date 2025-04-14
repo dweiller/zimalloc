@@ -1,6 +1,6 @@
 page_shift: std.math.Log2Int(usize),
 init_set: PageBitSet,
-pages: [small_page_count]Page.List.Node,
+pages: [small_page_count]Page,
 page_count: u32,
 heap: *Heap,
 next: ?Ptr,
