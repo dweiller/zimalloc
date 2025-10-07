@@ -131,10 +131,10 @@ pub fn build(b: *std.Build) void {
 
 const LibzimallocOptions = struct {
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.Mode,
+    optimize: std.builtin.OptimizeMode,
     zimalloc_options: *std.Build.Module,
     linkage: std.builtin.LinkMode = .dynamic,
-    pic: ?bool = true,
+    pie: ?bool = true,
 };
 
 fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Compile {
@@ -148,19 +148,20 @@ fn addLibzimalloc(b: *std.Build, options: LibzimallocOptions) *std.Build.Step.Co
     });
 
     const libzimalloc = switch (options.linkage) {
-        .dynamic => b.addSharedLibrary(.{
+        .dynamic => b.addLibrary(.{
             .name = "zimalloc",
             .root_module = root_module,
             .version = libzimalloc_version,
-            .pic = options.pic,
+            .linkage = .dynamic,
         }),
-        .static => b.addStaticLibrary(.{
+        .static => b.addLibrary(.{
             .name = "zimalloc",
             .root_module = root_module,
             .version = libzimalloc_version,
-            .pic = options.pic,
+            .linkage = .static,
         }),
     };
+    libzimalloc.pie = options.pie;
 
     libzimalloc.root_module.addImport("build_options", options.zimalloc_options);
     return libzimalloc;

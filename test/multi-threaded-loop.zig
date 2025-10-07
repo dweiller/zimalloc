@@ -89,13 +89,17 @@ fn logFn(
 ) void {
     if (comptime !std.log.logEnabled(message_level, scope)) return;
 
+    var buffer: [128]u8 = undefined;
+    var stderr = std.fs.File.stderr().writer(&buffer);
+    const writer = &stderr.interface;
+    defer writer.flush() catch {};
+
     const level_txt = comptime message_level.asText();
     const prefix1 = "[Thread {?d}-{d}] ";
     const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const stderr = std.io.getStdErr().writer();
     std.debug.lockStdErr();
     defer std.debug.unlockStdErr();
-    nosuspend stderr.print(
+    nosuspend writer.print(
         prefix1 ++ level_txt ++ prefix2 ++ format ++ "\n",
         .{ thread_index, std.Thread.getCurrentId() } ++ args,
     ) catch return;
